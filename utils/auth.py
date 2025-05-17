@@ -5,8 +5,9 @@ import streamlit as st
 from datetime import datetime
 from typing import Optional, Tuple, Dict
 from model import User, LearningPreference
+from cryptography.fernet import Fernet
 
-from utils.data import initialize_supabase
+from utils.data import initialize_supabase, controller
 
 db = initialize_supabase()
 
@@ -185,7 +186,16 @@ def login_user(username: str, password: str) -> Tuple[bool, str, Optional[User]]
             # Récupérer l'ID utilisateur
             user_id = auth_response.user.id
             
-            st.query_params["id"] = user_id
+            # Load the key from secrets.toml
+            key = st.secrets["encryption"]["key"]
+
+            # Use the key for encryption
+            cipher = Fernet(key.encode())
+
+            # Encrypt a string (must be bytes)
+            encrypted_user_id = cipher.encrypt(user_id.encode())
+            
+            controller.set('user_id', encrypted_user_id, max_age=60*60*24*30)  # 30 jours
             
             # Mettre à jour la date de dernière connexion
             current_time = datetime.now().isoformat()
@@ -219,7 +229,6 @@ def login_user(username: str, password: str) -> Tuple[bool, str, Optional[User]]
                 telegram_id=user_data.get('telegram_id'),
                 repositories=user_data.get('repositories', []),
                 chat_histories=user_data.get('chat_histories', []),
-                achievements=user_data.get('achievements', []),
                 badges=user_data.get('badges', []),
                 daily_challenges=user_data.get('daily_challenges', {}),
                 study_stats=user_data.get('study_stats', []),
