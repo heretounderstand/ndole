@@ -5,11 +5,13 @@ from pydantic import BaseModel, Field
 
 class Message(BaseModel):
     """Modèle pour les accès aux documents"""
+    message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    chat_id: str
     received_at: str = Field(default_factory=datetime.now().isoformat)
     content: str  # Contenu du message
     is_assistant: bool = Field(default=False)
     is_deleted: bool = Field(default=False)
-    score: Optional[int] = None  # Score de pertinence du message
+    score: Dict[str, Any] = Field(default_factory= dict)
     
     def get_received_at(self) -> datetime:
         """Retourne la date et l'heure de réception"""
@@ -53,13 +55,6 @@ class Document(BaseModel):
     type: str = Field(default="simple_text")
     cover: Optional[str] = None  # URL de l'image de couverture
 
-    accesses: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont vu le document
-    likes: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont aimé le document
-    dislikes: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui n'ont pas aimé le document
-    bookmarks: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont marqué le document
-    shares: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont partagé le document
-    number_of_indexed: int = 0  # Nombre d'indexations du document
-    
     word_count: Optional[int] = None
     page_count: Optional[int] = None
     owner_id: str
@@ -70,6 +65,37 @@ class Document(BaseModel):
     def get_upload_date(self) -> datetime:
         """Retourne la date et l'heure de téléchargement"""
         return datetime.fromisoformat(self.upload_date)
+
+class DocumentRepository(BaseModel):
+    """Modèle pour un dépôt de documents"""
+    repo_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: str = ""
+    is_public: bool = Field(default=False)
+    is_deleted: bool = Field(default=False)
+    owner_id: str
+    created_at: str = Field(default_factory=datetime.now().isoformat)
+    updated_at: str = Field(default_factory=datetime.now().isoformat)
+    categories: List[str] = Field(default_factory=list)
+    documents: List[str] = Field(default_factory=list)
+    banner: Optional[str] = None  # URL de la bannière du dépôt
+    
+    accesses: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont vu le document
+    likes: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont aimé le document
+    dislikes: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui n'ont pas aimé le document
+    bookmarks: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont marqué le document
+    shares: List[Access] = Field(default_factory=list)  # IDs des utilisateurs qui ont partagé le document
+    number_of_indexed: int = 0  # Nombre d'indexations du document
+    
+    related_repositories: List[str] = Field(default_factory=list)  # IDs des documents liés
+    
+    def get_created_at(self) -> datetime:
+        """Retourne la date et l'heure actuelles"""
+        return datetime.fromisoformat(self.created_at)
+    
+    def get_updated_at(self) -> datetime:
+        """Retourne la date et l'heure de la dernière modification"""
+        return datetime.fromisoformat(self.updated_at)
     
     def last_accessed(self, user_id: str, access_type: str) -> Optional[datetime]:
         """Retourne la dernière date d'accès au document de l'utilisateur"""
@@ -93,28 +119,19 @@ class Document(BaseModel):
         elif access_type == 'shares':
             return max((access.get_access_time() for access in self.shares if access.access_id == user_id), default=None)
         return None
-
-class DocumentRepository(BaseModel):
-    """Modèle pour un dépôt de documents"""
-    repo_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    description: str = ""
-    is_public: bool = Field(default=False)
-    is_deleted: bool = Field(default=False)
-    owner_id: str
-    created_at: str = Field(default_factory=datetime.now().isoformat)
-    updated_at: str = Field(default_factory=datetime.now().isoformat)
-    categories: List[str] = Field(default_factory=list)
-    documents: List[str] = Field(default_factory=list)
-    banner: Optional[str] = None  # URL de la bannière du dépôt
     
-    def get_created_at(self) -> datetime:
-        """Retourne la date et l'heure actuelles"""
-        return datetime.fromisoformat(self.created_at)
-    
-    def get_updated_at(self) -> datetime:
-        """Retourne la date et l'heure de la dernière modification"""
-        return datetime.fromisoformat(self.updated_at)
+    def get_document_stats(self) -> Dict[str, Any]:
+        """Retourne des statistiques sur les documents du dépôt"""
+        
+        # Calculer les statistiques
+        return {
+            "document_count": len(self.documents),
+            "access_count": len(self.accesses),
+            "pertinence_count": len(self.likes) - len(self.dislikes),
+            "indexed_count": self.number_of_indexed,
+            "shared_count": len(self.shares),
+            "saved_count": len(self.bookmarks)
+        }
 
 class ChatHistory(BaseModel):
     """Modèle pour l'historique de conversation"""
@@ -123,16 +140,11 @@ class ChatHistory(BaseModel):
     title: str = "New Conversation"
     created_at: str = Field(default_factory=datetime.now().isoformat)
     last_message: str = Field(default_factory=datetime.now().isoformat)
-    messages: List[Message] = Field(default_factory=list)
+    messages: List[str] = Field(default_factory=list)
     repo_source: str 
     type: str
     is_deleted: bool = Field(default=False)
-    
-    def get_average_score(self) -> float:
-        """Retourne le score moyen de la conversation"""
-        if not self.messages:
-            return 0.0
-        return sum(msg.score for msg in self.messages if msg.score is not None) / len(self.messages)
+    mode: Dict[str, Any] = Field(default_factory= dict)
     
     def get_created_at(self) -> datetime:
         """Retourne la date et l'heure de création"""
@@ -141,14 +153,6 @@ class ChatHistory(BaseModel):
     def get_last_message(self) -> datetime:
         """Retourne la date et l'heure du dernier message"""
         return datetime.fromisoformat(self.last_message)
-
-class Achievement(BaseModel):
-    """Modèle pour les accomplissements et badges"""
-    achievement_id: str
-    name: str
-    description: str
-    icon_url: str = ""
-    unlocked_at: Optional[datetime] = None
     
 class StudyStats(BaseModel):
     """Modèle pour le suivi des statistiques d'étude"""
@@ -187,7 +191,6 @@ class User(BaseModel):
     # Système de gamification
     experience_points: int = 0
     level: int = 1
-    achievements: List[Achievement] = Field(default_factory=list)
     badges: List[str] = Field(default_factory=list)
     daily_challenges: Dict[str, bool] = Field(default_factory=dict)
     
@@ -219,45 +222,6 @@ class User(BaseModel):
             return datetime.fromisoformat(self.last_login)
         return None
     
-    def add_chat_history(self, title: str = "Nouvelle conversation", document_sources: List[str] = None) -> str:
-        """Crée un nouvel historique de conversation et retourne son ID"""
-        if document_sources is None:
-            document_sources = []
-            
-        chat = ChatHistory(title=title, document_sources=document_sources)
-        self.chat_histories.append(chat)
-        return chat.conversation_id
-    
-    def add_achievement(self, achievement_id: str, name: str, description: str, icon_url: str = "") -> None:
-        """Ajoute un accomplissement au profil utilisateur"""
-        achievement = Achievement(
-            achievement_id=achievement_id,
-            name=name,
-            description=description,
-            icon_url=icon_url,
-            unlocked_at=datetime.now()
-        )
-        self.achievements.append(achievement)
-        
-    def update_study_stats(self, stats_update: Dict[str, Any]) -> None:
-        """Met à jour les statistiques d'étude de l'utilisateur"""
-        for key, value in stats_update.items():
-            if hasattr(self.study_stats, key):
-                current_value = getattr(self.study_stats, key)
-                
-                # Pour les dictionnaires, mise à jour au lieu de remplacement
-                if isinstance(current_value, dict) and isinstance(value, dict):
-                    current_value.update(value)
-                # Pour les valeurs numériques, addition au lieu de remplacement
-                elif isinstance(current_value, (int, float)) and isinstance(value, (int, float)):
-                    setattr(self.study_stats, key, current_value + value)
-                # Pour les autres types, simple remplacement
-                else:
-                    setattr(self.study_stats, key, value)
-        
-        # Mettre à jour la date de dernière activité
-        self.study_stats.last_activity = datetime.now()
-    
     def calculate_level(self) -> int:
         """Calcule le niveau utilisateur en fonction des points d'expérience"""
         # Formule simple : chaque niveau requiert 100 * niveau points pour passer au suivant
@@ -270,19 +234,3 @@ class User(BaseModel):
             
         self.level = level
         return level
-    
-    def add_experience(self, points: int) -> Dict[str, Any]:
-        """Ajoute des points d'expérience et retourne les informations de niveau"""
-        old_level = self.level
-        self.experience_points += points
-        new_level = self.calculate_level()
-        
-        level_up = new_level > old_level
-        
-        return {
-            "points_added": points,
-            "total_points": self.experience_points,
-            "current_level": new_level,
-            "level_up": level_up,
-            "next_level_points": 100 * (new_level + 1)
-        }
