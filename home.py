@@ -1,11 +1,13 @@
 import streamlit as st
 from datetime import datetime
 import shutil
+from cryptography.fernet import Fernet
 
 # Import des modules d'authentification
 from utils.auth import login_user, register_user, generate_credentials, check_credentials
-from utils.user import get_user
-from ui.repo import display_repositories
+from utils.user import get_user, list_repositories, list_histories
+from utils.data import controller
+from ui.repo import display_document_repositories
 from ui.bot import display_chats
 
 # Configuration de la page
@@ -15,9 +17,19 @@ st.set_page_config(
     layout="wide"
 )
 
-if st.query_params["id"] and st.query_params["id"] != "None":
-    st.session_state.user = get_user(st.query_params["id"])
-    st.session_state.logged_in = True
+if "logged_in" not in st.session_state and "user" not in st.session_state:
+    # Load the key from secrets.toml
+    key = st.secrets["encryption"]["key"]
+
+    # Use the key for encryption
+    cipher = Fernet(key.encode())
+
+    cookie = controller.get('user_id')
+
+    if cookie:
+        real_cookie = cipher.decrypt(cookie).decode()
+        st.session_state.user = get_user(real_cookie)
+        st.session_state.logged_in = True
 
 # Initialisation des états de session
 if "logged_in" not in st.session_state:
@@ -50,7 +62,7 @@ def toggle_register_form():
 def logout():
     """Déconnexion de Firebase Auth et réinitialisation des états de session"""
     # Réinitialiser les états de session
-    st.query_params["id"] = None
+    controller.remove('user_id')
     st.session_state.logged_in = False
     st.session_state.user = None
     st.session_state.supabase_token = None
@@ -125,23 +137,6 @@ def handle_registration(username, password, method="manual"):
     except Exception as e:
         st.error(f"Error during registration: {str(e)}")
 
-# Fonction de vérification de session
-def verify_session():
-    """Vérifie si la session utilisateur est toujours valide"""
-    if st.session_state.logged_in and st.session_state.firebase_token:
-        try:
-            # Vérifier la validité du token (cette étape nécessite généralement une vérification côté serveur)
-            # Pour une vérification complète, vous devriez implémenter une validation de token avec Firebase Admin SDK
-            
-            # Rafraîchir le token si nécessaire
-            # Cette étape dépend de la façon dont vous gérez les tokens expirés
-            return True
-        except Exception:
-            # Si le token n'est plus valide, déconnecter l'utilisateur
-            logout()
-            return False
-    return st.session_state.logged_in
-
 # Barre latérale avec navigation
 with st.sidebar:
     st.image("logo.png", width=150)
@@ -186,7 +181,7 @@ def main_content():
         if st.session_state.current_page == "home":
             display_user_dashboard()
         elif st.session_state.current_page == "repositories":
-            display_repositories()
+            display_document_repositories()
         elif st.session_state.current_page == "assistant":
             display_chats()
     else:
@@ -266,7 +261,7 @@ def display_landing_page():
 
                     if submit_register:
                         if password != password_confirm:
-                            st.error("❌ Passwords do not match.")
+                            st.error("Passwords do not match.")
                         elif not username or not password:
                             st.warning("Please complete all fields.")
                         else:
@@ -298,108 +293,97 @@ def display_landing_page():
 
 def display_user_dashboard():
     user = st.session_state.user
-    
-    # Header with user info
-    col1, col2 = st.columns([2, 1])
-    
+
+    # Header
+    st.markdown(f"## 👋 Welcome back, **{user.username}**!")
+    st.write("Here’s a snapshot of your progress on Ndolè:")
+
+    # Progress bar and level
+    col1, col2 = st.columns([3, 1])
     with col1:
-        st.title(f"Welcome, {user.username} 👋")
-        st.write(f"Glad to have you back on Ndolè! Here is your personalized dashboard.")
-    
-    with col2:
-        # Display level and progress
-        st.metric("Current Level", user.level)
-        progress = (user.experience_points % 100) / 100  # Simulating progress
+        st.markdown("#### 🧠 Your Progress")
+        progress = (user.experience_points % 100) / 100
         st.progress(progress)
-        st.caption(f"Progress: {user.experience_points} XP / {user.level * 100} XP to reach the next level")
-    
-    # Retrieve user statistics
-    stats = calculate_user_stats(user)
-    
-    # Stats in columns
-    st.subheader("Your Activity Overview")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Documents", stats["documents_count"])
+        st.caption(f"{user.experience_points} XP / {user.level * 100} XP to reach level {user.level + 1}")
     with col2:
-        st.metric("Conversations", stats["conversations_count"])
-    with col3:
-        st.metric("Active Days", stats["days_active"])
-    with col4:
-        st.metric("Badges Unlocked", len(user.badges))
-    
-    # Recent repositories and conversations
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        st.subheader("Your Recent Repositories")
-        if hasattr(user, "repositories") and user.repositories:
-            for i, repo in enumerate(user.repositories[:3]):
+        st.metric("⭐ Current Level", user.level)
+
+    st.divider()
+
+    # Stats section
+    st.markdown("### 📊 Your Activity Overview")
+    stats = calculate_user_stats(user)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("📁 Repositories", stats["documents_count"])
+    col2.metric("💬 Conversations", stats["conversations_count"])
+    col3.metric("📆 Active Days", stats["days_active"])
+    col4.metric("🏅 Badges", len(user.badges))
+
+    st.divider()
+
+    # Repositories & Conversations
+    repo_col, chat_col = st.columns(2)
+
+    user_repo = list_repositories(user.repositories) if hasattr(user, "repositories") else []
+    user_chat = list_histories(user.chat_histories) if hasattr(user, "chat_histories") else []
+
+    with repo_col:
+        st.markdown("### 📁 Recent Repositories")
+        if user_repo:
+            for i, repo in enumerate(user_repo[:3]):
                 with st.container():
-                    st.write(f"📁 {repo.name if hasattr(repo, 'name') else f'Repository #{i+1}'}")
-                    st.caption(f"{len(repo.documents) if hasattr(repo, 'documents') else 0} documents")
+                    name = repo["name"] if repo["name"] else f"Repository #{i+1}"
+                    doc_count = len(repo["documents"]) if repo["documents"] else 0
+                    st.write(f"**{name}** — {doc_count} document(s)")
         else:
-            st.info("You haven't created any repositories yet. Start by creating one!")
-            if st.button("Create a Repository"):
+            st.info("You haven't created any repositories yet.")
+            if st.button("➕ Create Your First Repository"):
                 set_page("repositories")
-    
-    with col_right:
-        st.subheader("Recent Conversations")
-        if hasattr(user, "chat_histories") and user.chat_histories:
-            for i, chat in enumerate(user.chat_histories[:3]):
+
+    with chat_col:
+        st.markdown("### 💬 Recent Conversations")
+        if user_chat:
+            for i, chat in enumerate(user_chat[:3]):
                 with st.container():
-                    st.write(f"💬 {chat.title if hasattr(chat, 'title') else f'Conversation #{i+1}'}")
-                    st.caption(f"Last activity: {chat.last_updated.strftime('%d/%m/%Y') if hasattr(chat, 'last_updated') else 'N/A'}")
+                    title = chat["title"] if chat["title"] else f"Conversation #{i+1}"
+                    last_msg = (
+                        datetime.fromisoformat(chat["last_message"]).strftime("%d/%m/%Y")
+                        if chat["last_message"] else "N/A"
+                    )
+                    st.write(f"**{title}** — Last message: *{last_msg}*")
         else:
-            st.info("You haven't had any conversations yet. Start chatting with the assistant!")
-            if st.button("Open Assistant"):
+            st.info("No conversations yet. Start a chat with the assistant!")
+            if st.button("💬 Open Assistant"):
                 set_page("assistant")
-    
+
+    st.divider()
+
     # Daily Challenges
-    st.subheader("Daily Challenges")
-    challenges_col1, challenges_col2, challenges_col3 = st.columns(3)
-    
-    # Simulating some daily challenges
+    st.markdown("### 🎯 Daily Challenges")
     daily_challenges = [
-        {"name": "Study for 30 minutes", "completed": True},
-        {"name": "Add a new document", "completed": False},
-        {"name": "Ask 3 questions to the assistant", "completed": False}
+        {"name": "Study for 30 minutes", "completed": True, "reward": "+20 XP", "progress": "✅ Completed"},
+        {"name": "Add a new document", "completed": False, "reward": "+15 XP", "progress": "⏳ In progress (0/1)"},
+        {"name": "Ask 3 questions to the assistant", "completed": False, "reward": "+10 XP", "progress": "⏳ In progress (0/3)"},
     ]
-    
-    with challenges_col1:
-        challenge = daily_challenges[0]
-        st.checkbox(challenge["name"], value=challenge["completed"], disabled=True)
-        if challenge["completed"]:
-            st.caption("✅ Completed | +20 XP")
-        else:
-            st.caption("⏳ In progress | 0/30 minutes")
-    
-    with challenges_col2:
-        challenge = daily_challenges[1]
-        st.checkbox(challenge["name"], value=challenge["completed"], disabled=True)
-        if challenge["completed"]:
-            st.caption("✅ Completed | +15 XP")
-        else:
-            st.caption("⏳ In progress | 0/1 documents")
-    
-    with challenges_col3:
-        challenge = daily_challenges[2]
-        st.checkbox(challenge["name"], value=challenge["completed"], disabled=True)
-        if challenge["completed"]:
-            st.caption("✅ Completed | +10 XP")
-        else:
-            st.caption("⏳ In progress | 0/3 questions")
-    
-    # Personalized Suggestions
-    st.subheader("Personalized Suggestions")
-    suggestion_col1, suggestion_col2 = st.columns(2)
-    
-    with suggestion_col1:
-        st.info("📚 **Study Suggestion:** Based on your recent activity, we recommend reviewing your documents on 'Advanced Python'.")
-    
-    with suggestion_col2:
-        st.info("🏆 **Next Badge:** 'Python Expert' - Complete 5 Python quizzes to unlock it.")
+
+    ch1, ch2, ch3 = st.columns(3)
+    for i, ch in enumerate(daily_challenges):
+        with [ch1, ch2, ch3][i]:
+            st.checkbox(ch["name"], value=ch["completed"], disabled=True)
+            st.caption(f"{ch['progress']} | {ch['reward']}")
+
+    st.divider()
+
+    # Suggestions
+    st.markdown("### 🤖 Personalized Suggestions")
+    s1, s2 = st.columns(2)
+
+    with s1:
+        st.info("📚 **Study Tip:** We suggest reviewing your notes on *Advanced Python* for better retention.")
+
+    with s2:
+        st.info("🏆 **Badge Progress:** You're close to unlocking **Python Expert** — complete 5 Python quizzes.")
 
 # Exécution de la page principale
 main_content()
