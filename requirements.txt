@@ -1,0 +1,13 @@
+streamlit
+pydantic
+cryptography
+sympy
+sentence_transformers
+pymupdf
+streamlit_cookies_controller
+supabase
+pandas
+plotly
+numpy
+matplotlib
+google-generativeai
