@@ -1,0 +1,10 @@
+[theme]
+base = "dark"
+primaryColor = "#4CAF50"           # Vert vif pour ressortir dans le sombre
+backgroundColor = "#121212"        # Noir doux
+secondaryBackgroundColor = "#1E1E1E" # Gris très foncé
+textColor = "#E0F2F1"              # Vert clair légèrement bleuté
+font = "sans serif"
+
+[server]
+maxUploadSize = 10
