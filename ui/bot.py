@@ -17,6 +17,7 @@ def display_chats():
     st.session_state.setdefault("chat", None)
     st.session_state.setdefault("messages", [])
     st.session_state.setdefault("chat_session", None)
+    st.session_state.setdefault("chat_histories", [])
     with st.expander("📂 Manage my conversations", expanded=True):
         st.markdown("### ✨ New conversation")
         chat_type = st.selectbox(
