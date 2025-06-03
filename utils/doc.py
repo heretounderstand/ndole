@@ -231,9 +231,9 @@ def upload_document(file_data: bytes, filename: str, repo_id: str, owner_id: str
                 chunks.extend(chunk)
     finally:
         os.unlink(temp_path)
-    storage_path = f"documents/{repo_id}/{doc_id}.pdf"
+    storage_path = f"documents/{owner_id}/{doc_id}.pdf"
     db.storage.from_('documents').upload(
-        path=f"{repo_id}/{doc_id}.pdf",
+        path=f"{owner_id}/{doc_id}.pdf",
         file=file_data,
         file_options={"content_type": "application/pdf"}
     )
