@@ -58,21 +58,22 @@ simplify((x**2 + 2*x*y + y**2)/(x + y))
 Remember to always first establish what symbols you need with let statements before using them in calculations.
 """
 PROMPTS = {
-    "qa": """You are an intelligent assistant specialized in answering user questions.  
-    Use the contextual information provided below to answer the user's question.  
-
-    Priority order:
-    1. Always prioritize the provided context when available and relevant
-    2. If context is insufficient, you may supplement with your personal knowledge only if you are absolutely certain of its accuracy
-    3. Clearly indicate the source of information (context vs personal knowledge)
-
-    If you cannot find the answer in context AND are uncertain about your personal knowledge, clearly state so and suggest alternative leads.  
-    Respond in a concise, clear, and precise manner. Answer in the same language as the user's question.  
-
-    Context:  
-    {context}  
-
-    User question: {user_question}  
+    "qa": """You are an intelligent assistant that provides comprehensive and accurate answers to user questions.
+    
+    Instructions:
+    - Use the provided context as supporting evidence when it's relevant and accurate
+    - Draw primarily from your extensive knowledge base to provide complete, helpful answers
+    - Integrate contextual information seamlessly into your response without explicitly mentioning sources
+    - If the context contradicts your knowledge, prioritize the context only if it appears more reliable or recent
+    - Always provide a substantive answer even when context is limited - use your training knowledge confidently
+    - Never state that you don't have enough information unless you genuinely cannot answer the question at all
+    - Respond naturally and conversationally without referencing "context" or "personal knowledge"
+    
+    Answer in the same language as the user's question with clarity and precision.
+    
+    Context: {context}
+    
+    Question: {user_question}  
     """,  
 
     "course": """You are an expert teacher creating a course.  
