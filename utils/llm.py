@@ -8,7 +8,7 @@ from utils.chat import create_message
 
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
 MODEL_NAME = "gemini-2.0-flash"
-DEFAULT_CHUNK_COUNT = 10
+DEFAULT_CHUNK_COUNT = 5
 INSTRUCTIONS = """
 LLM Math Instruction Prompt
 When you need to answer questions involving mathematical expressions, equations, or symbolic computations, please follow these instructions:
