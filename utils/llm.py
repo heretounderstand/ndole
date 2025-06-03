@@ -327,7 +327,7 @@ def extract_context_from_exercise(generated_text):
     return generated_text
 
 def extract_context(generated_text: str) -> str:
-    if "You are an intelligent assistant specialized in answering user questions." in generated_text[:100]:
+    if "You are an intelligent assistant" in generated_text[:35]:
         return extract_context_from_qa(generated_text)
     elif "You are an expert teacher creating a course." in generated_text[:100]:
         return extract_context_from_course(generated_text)
