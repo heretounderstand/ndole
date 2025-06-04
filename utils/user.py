@@ -178,7 +178,7 @@ def update_study_stats(user_id: str, study_stat: StudyStats, is_login: bool = Fa
                         }
     new_stat_data = new_stat.dict()
     for challenge_id, challenge in challenges.items():
-        if new_stat_data[challenge["stat_field"]] >= challenge["target_value"]:
+        if new_stat_data[challenge["stat_field"]] >= challenge["target_value"] and not challenge["completed"]:
             new_stat_data["xp_gained"] += challenge["xp_reward"]
             new_stat_data["challenges_completed"] += 1
             xp += challenge["xp_reward"]
