@@ -30,7 +30,7 @@ def display_chats():
             }[x]
         )
         chat_title = st.text_input("Conversation title", value="New conversation")
-        if 'repo' in st.session_state:
+        if 'repo' in st.session_state and len(st.session_state.chunks)>0:
             if st.button("➕ Create conversation"):
                 new_chat_id = create_chat_history(user_id, repo_id, chat_type, chat_title)
                 if new_chat_id:
@@ -43,7 +43,7 @@ def display_chats():
                     st.success(f"Conversation '{chat_title}' created successfully!")
                     st.rerun()
         else:
-            st.warning("Please select a document repository to create a conversation.")
+            st.warning("Please select a document repository with at least one document to create a conversation.")
         st.divider()
         user_chat_ids = st.session_state.user.chat_histories
         if user_chat_ids:
