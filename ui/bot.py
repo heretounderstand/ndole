@@ -36,6 +36,7 @@ def display_chats():
                 if new_chat_id:
                     st.session_state.user.chat_histories.append(new_chat_id)
                     st.session_state.chat_session = None
+                    st.session_state.messages = []
                     xp_up = update_study_stats(user_id, StudyStats(xp_gained=5, chat_created=1))
                     if xp_up:
                         st.session_state.user.experience_points += 5
