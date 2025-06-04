@@ -7,7 +7,7 @@ from utils.embedding import best_matchs
 from utils.chat import create_message
 
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
-MODEL_NAME = "gemma-3n-e4b-it"
+MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 DEFAULT_CHUNK_COUNT = 5
 INSTRUCTIONS = """
 LLM Math Instruction Prompt
