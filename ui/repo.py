@@ -147,7 +147,7 @@ def display_repository_card(repository: DocumentRepository, user_id: str, is_own
                                 tmp_file.write(uploaded_file.getvalue())
                                 temp_path = tmp_file.name
 
-                            success = update_repository_banner(repository.repo_id, temp_path)
+                            success = update_repository_banner(user_id, repository.repo_id, temp_path)
                             os.unlink(temp_path)
                             if success:
                                 st.success("Banner updated successfully!")
@@ -324,7 +324,7 @@ def check_repositories(user_id: str, user_repos: List[DocumentRepository]):
                                     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{cover_file.name.split('.')[-1]}") as tmp:
                                         tmp.write(cover_file.getvalue())
                                         tmp_path = tmp.name
-                                    if update_document_cover(doc_id, tmp_path):
+                                    if update_document_cover(user_id, doc_id, tmp_path):
                                         st.success("Cover added successfully!")
                                     else:
                                         st.error("Failed to add cover.")
@@ -456,7 +456,7 @@ def check_repositories(user_id: str, user_repos: List[DocumentRepository]):
                         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{new_cover_file.name.split('.')[-1]}") as tmp:
                             tmp.write(new_cover_file.getvalue())
                             tmp_path = tmp.name
-                        cover_updated = update_document_cover(doc.doc_id, tmp_path)
+                        cover_updated = update_document_cover(user_id, doc.doc_id, tmp_path)
                         try:
                             os.unlink(tmp_path)
                         except:
