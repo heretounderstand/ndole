@@ -173,7 +173,7 @@ def update_repository_access(repo_id: str, access: Access, access_type: str) -> 
     update_response = db.table('document_repositories').update(update_data).eq('repo_id', repo_id).execute()
     return len(update_response.data) > 0
 
-def update_repository_banner(repo_id: str, file_path:str) -> bool:
+def update_repository_banner(owner_id: str, repo_id: str, file_path:str) -> bool:
     with open(file_path, 'rb') as f:
         file_data = f.read()
     file_size = len(file_data)
@@ -187,9 +187,9 @@ def update_repository_banner(repo_id: str, file_path:str) -> bool:
         '.png': 'image/png'
     }
     file_options['content-type'] = mime_types.get(extension, 'application/octet-stream')
-    storage_path = f"banners/{repo_id}/{file_path.split('.')[0]}.{extension}"
+    storage_path = f"banners/{owner_id}/{repo_id}/{file_path.split('.')[0]}.{extension}"
     db.storage.from_('banners').upload(
-        path=f"{repo_id}/{file_path.split('.')[0]}.{extension}",
+        path=f"{owner_id}/{repo_id}/{file_path.split('.')[0]}.{extension}",
         file=file_data,
         file_options=file_options
     )
@@ -317,7 +317,7 @@ def get_list_of_documents(doc_ids: List[str]) -> List[Document]:
             documents.append(document)
     return documents
 
-def update_document_cover(doc_id: str, file_path:str) -> bool:
+def update_document_cover(owner_id: str, doc_id: str, file_path:str) -> bool:
     with open(file_path, 'rb') as f:
         file_data = f.read()
     file_options = {}
@@ -328,9 +328,9 @@ def update_document_cover(doc_id: str, file_path:str) -> bool:
         '.png': 'image/png'
     }
     file_options['content-type'] = mime_types.get(extension, 'application/octet-stream')
-    storage_path = f"covers/{doc_id}/{file_path.split('.')[0]}.{extension}"
+    storage_path = f"covers/{owner_id}/{doc_id}/{file_path.split('.')[0]}.{extension}"
     db.storage.from_('covers').upload(
-        path=f"{doc_id}/{file_path.split('.')[0]}.{extension}",
+        path=f"{owner_id}/{doc_id}/{file_path.split('.')[0]}.{extension}",
         file=file_data,
         file_options=file_options
     )
