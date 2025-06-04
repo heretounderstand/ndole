@@ -7,7 +7,7 @@ from utils.embedding import best_matchs
 from utils.chat import create_message
 
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-2.5-flash-preview-04-17"
 DEFAULT_CHUNK_COUNT = 5
 INSTRUCTIONS = """
 LLM Math Instruction Prompt
@@ -75,42 +75,39 @@ PROMPTS = {
     
     Question: {user_question}  
     """,  
+    "course": """You are an expert teacher with extensive pedagogical knowledge and subject matter expertise.
 
-    "course": """You are an expert teacher creating a course.  
-    Use the information provided below to generate a structured and educational lesson.  
-
-    Priority order:
-    1. Always prioritize the provided reference content when available and relevant
-    2. If reference content is insufficient, you may supplement with your expertise only if you are absolutely certain of its accuracy
-    3. Clearly indicate the source of information (reference content vs personal expertise)
-
-    The course should be organized with an introduction, main sections, and a conclusion.  
-    Include practical examples to illustrate the presented concepts. Respond in the language of the course topic.  
-
-    Reference content:  
-    {context}  
-
+    Create a comprehensive, structured, and engaging course lesson on the given topic.
+    
+    Instructions:
+    - Design a complete educational experience drawing from your deep expertise in teaching and the subject matter
+    - Integrate any provided reference content seamlessly to enrich and support your lesson
+    - Structure your course with: introduction, main learning sections, practical examples, and conclusion
+    - Include concrete examples, exercises, or case studies to illustrate key concepts
+    - Use clear, progressive learning sequences that build understanding step by step
+    - Adapt your teaching style to make complex concepts accessible and engaging
+    - Provide actionable knowledge that learners can immediately apply
+    - Write in a natural, authoritative teaching voice without referencing sources
+    
+    Respond in the language appropriate for the course topic and target audience.
+    
+    Reference content: {context}
+    
     Course topic: {topic}  
     """,  
-
-    "exercise": """You are a trainer creating multiple-choice questions (QCM) for practical exercises.
-
-    Use the information provided below to generate relevant multiple-choice questions.
-
-    Priority order:
-    1. Always prioritize the provided reference content when available and relevant
-    2. If reference content is insufficient, you may supplement with your expertise only if you are absolutely certain of its accuracy
-    3. Clearly indicate the source of information (reference content vs personal expertise) in explanations
-
-    The questions should test understanding and application of the concepts.
-
-    For each question:
-    1. Create a clear problem statement
-    2. Provide exactly 4 answer choices labeled A, B, C, and D
-    3. Indicate the correct answer
-    4. Include a detailed explanation why the correct answer is right and why the others are wrong
-
-    Format each question as follows:
+    "exercise": """You are an experienced trainer and assessment specialist with expertise in creating high-quality multiple-choice questions that effectively test knowledge and skills.
+    
+    Create engaging and challenging multiple-choice questions that assess both understanding and practical application of concepts. Draw from your extensive expertise in the subject matter and assessment design.
+    
+    Instructions:
+    - Develop questions that test critical thinking, not just memorization
+    - Use any provided reference content to enhance and validate your questions
+    - Create realistic scenarios and practical applications
+    - Ensure distractors (wrong answers) are plausible but clearly incorrect
+    - Write clear, unambiguous question stems
+    - Provide comprehensive explanations that reinforce learning
+    
+    Format each question exactly as follows:
     <question>
     <stem>Problem statement goes here</stem>
     <options>
@@ -121,18 +118,16 @@ PROMPTS = {
     </options>
     <answer>X</answer> (where X is the correct option letter)
     <explanation>
-    Detailed explanation why the correct answer is right and why the other options are incorrect.
+    Clear explanation of why the correct answer is right and why other options are incorrect, helping reinforce the learning objectives.
     </explanation>
     </question>
-
+    
     Generate exactly {number_of_questions} questions (default: 3 if not specified).
-
-    Reference content:
-    {context}
-
+    
+    Reference content: {context}
     Exercise request: {exercise_request}
-
-    Respond in the language of the exercise request. 
+    
+    Respond in the language of the exercise request.
     """  
     }
 
@@ -329,8 +324,8 @@ def extract_context_from_exercise(generated_text):
 def extract_context(generated_text: str) -> str:
     if "You are an intelligent assistant" in generated_text[:35]:
         return extract_context_from_qa(generated_text)
-    elif "You are an expert teacher creating a course." in generated_text[:100]:
+    elif "You are an expert teacher" in generated_text[:25]:
         return extract_context_from_course(generated_text)
-    elif "You are a trainer creating multiple-choice questions (QCM) for practical exercises." in generated_text[:100]:
+    elif "You are an experienced trainer" in generated_text[:30]:
         return extract_context_from_exercise(generated_text)
     return generated_text
