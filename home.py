@@ -290,7 +290,7 @@ def display_user_dashboard():
         ch1, ch2, ch3 = st.columns(3)
         for i, ch in enumerate(daily_challenges):
             with [ch1, ch2, ch3][i]:
-                st.checkbox(ch["name"], value=ch["completed"], disabled=True)
+                st.checkbox(ch["name"], value=ch["completed"], disabled=True, key="{ch['name']}_{i}")
                 st.caption(f"{"✅ Completed" if ch['completed'] else "⏳ In progress"} | +{ch['xp_reward']} XP")
     else:
         st.info("It looks like you have a clear day! ☀️")
