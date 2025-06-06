@@ -1,4 +1,4 @@
-# Educational AI Platform
+# NDOLE - Educational AI Platform
 
 An open-source educational AI platform that combines document management with AI-powered learning tools, designed for cost-effective education in resource-constrained environments.
 
