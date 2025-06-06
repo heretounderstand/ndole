@@ -1,6 +1,5 @@
 streamlit
 pydantic
-cryptography
 sympy
 sentence_transformers
 pymupdf
