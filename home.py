@@ -1,10 +1,8 @@
 import streamlit as st
 from datetime import datetime
-from cryptography.fernet import Fernet
 from ui.setting import display_settings
 from utils.auth import login_user, register_user, generate_credentials, check_credentials
 from utils.user import get_user, list_repositories, list_histories, update_study_stats
-from utils.data import controller
 from ui.repo import display_document_repositories
 from ui.bot import display_chats
 from ui.stat import display_statistics
@@ -17,14 +15,6 @@ st.set_page_config(
     layout="wide"
 )
 
-if "logged_in" not in st.session_state and "user" not in st.session_state:
-    key = st.secrets["encryption"]["key"]
-    cipher = Fernet(key.encode())
-    cookie = controller.get('user_id')
-    if cookie:
-        real_cookie = cipher.decrypt(cookie).decode()
-        st.session_state.user = get_user(real_cookie)
-        st.session_state.logged_in = True
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user" not in st.session_state:
@@ -50,10 +40,8 @@ def toggle_register_form():
     st.session_state.show_login = False
 
 def logout():
-    controller.remove('user_id')
     st.session_state.logged_in = False
     st.session_state.user = None
-    st.session_state.supabase_token = None
     st.rerun()
 
 def calculate_user_stats(user):
