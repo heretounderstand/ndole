@@ -1,11 +1,9 @@
 import random
 import string
 import re
-import streamlit as st
 from datetime import datetime
 from typing import Optional, Tuple, Dict
 from model import User, LearningPreference
-from cryptography.fernet import Fernet
 
 from utils.data import initialize_supabase, controller
 
@@ -107,10 +105,6 @@ def login_user(username: str, password: str) -> Tuple[bool, str, Optional[User]]
             if auth_response.user == None:
                 return False, "Incorrect username or password.", None
             user_id = auth_response.user.id
-            key = st.secrets["encryption"]["key"]
-            cipher = Fernet(key.encode())
-            encrypted_user_id = cipher.encrypt(user_id.encode())
-            controller.set('user_id', encrypted_user_id, max_age=60*60*24*30)
             current_time = datetime.now().isoformat()
             user_response = db.table('users').select('*').eq('user_id', user_id).limit(1).execute()
             if len(user_response.data) == 0:
