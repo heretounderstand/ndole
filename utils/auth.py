@@ -4,8 +4,7 @@ import re
 from datetime import datetime
 from typing import Optional, Tuple, Dict
 from model import User, LearningPreference
-
-from utils.data import initialize_supabase, controller
+from utils.data import initialize_supabase
 
 db = initialize_supabase()
 
