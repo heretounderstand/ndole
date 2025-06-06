@@ -128,6 +128,7 @@ def display_chats():
 def display_qa_interface():
     user_message = st.chat_input("Posez votre question...")
     if user_message:
+        user_message = process_llm_response(user_message)
         st.chat_message("user").markdown(user_message)
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
@@ -164,6 +165,7 @@ def display_course_interface():
                     page_number = st.number_input("Page number", min_value=1, value=1)
             if st.form_submit_button("Generate the course"):
                 if topic:
+                    topic = process_llm_response(topic)
                     with st.chat_message("user"):
                         st.markdown(f"Generating a course on: **{topic}**")
                     with st.chat_message("assistant"):
@@ -198,6 +200,7 @@ def display_course_interface():
     else:
         user_message = st.chat_input("Ask a question about this course...")
         if user_message:
+            user_message = process_llm_response(user_message)
             st.chat_message("user").markdown(user_message)
             with st.chat_message("assistant"):
                 placeholder = st.empty()
@@ -236,6 +239,7 @@ def display_exercise_interface():
             num_exercises = st.slider("Number of exercises", min_value=1, max_value=5, value=3)
             if st.form_submit_button("Generate exercises"):
                 if topic:
+                    topic = process_llm_response(topic)
                     with st.chat_message("user"):
                         st.markdown(f"Generating {num_exercises} exercises on: **{topic}**")
                     with st.chat_message("assistant"):
@@ -274,6 +278,7 @@ def display_exercise_interface():
     else:
         user_message = st.chat_input("Posez une question sur ces exercices...")
         if user_message:
+            user_message = process_llm_response(user_message)
             st.chat_message("user").markdown(user_message)
             with st.chat_message("assistant"):
                 placeholder = st.empty()
