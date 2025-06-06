@@ -225,9 +225,10 @@ class User(BaseModel):
             total_stats.questions_answered += stats.questions_answered
             total_stats.questions_asked += stats.questions_asked
             total_stats.correct_answers += stats.correct_answers
-            total_stats.streak_days += stats.streak_days
             total_stats.challenges_completed += stats.challenges_completed
             total_stats.xp_gained += stats.xp_gained
+            if stats.streak_days > total_stats.streak_days:
+                total_stats.streak_days = stats.streak_days
         return {
             "total_study_time": total_stats.total_study_time,
             "documents_read": total_stats.documents_read,
