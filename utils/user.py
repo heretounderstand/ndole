@@ -49,8 +49,8 @@ def list_histories(chat_ids: List[str]) -> List[dict]:
     histories = []
     for chat_id in chat_ids:
         response = db.table('chat_histories').select('title, last_message, created_at').eq('chat_id', chat_id).eq('is_deleted', False).limit(1).execute()
-        chat_data = response.data[0]
-        histories.append(chat_data)
+        if response.data:
+            histories.append(response.data[0])
     return histories
 
 def update_user_badges(user_id: str, earned_badges: List[str]) -> bool:
