@@ -41,8 +41,8 @@ def list_repositories(repo_ids: List[str]) -> List[dict]:
     repositories = []
     for repo_id in repo_ids:
         response = db.table('document_repositories').select('name, documents').eq('repo_id', repo_id).eq('is_deleted', False).limit(1).execute()
-        repo_data = response.data[0]
-        repositories.append(repo_data)
+        if response.data:
+            repositories.append(response.data[0])
     return repositories
 
 def list_histories(chat_ids: List[str]) -> List[dict]:
