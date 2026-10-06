@@ -1,363 +1,299 @@
 import os
 import uuid
-from datetime import datetime
-import tempfile
-from typing import List, Optional
-import pymupdf as pdf
-from model import Document, DocumentRepository, Access
+from typing import Any, Dict, List, Optional, Tuple
+import pymupdf
+import streamlit as st
+from model import ACCESS_TYPES, Access, Chunk, Document, DocumentRepository, now_iso
 from utils.embedding import generate_embeddings
-from utils.data import initialize_supabase
+from utils.data import get_db
+from utils.user import toggle_access
 
-db = initialize_supabase()
+MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
+IMAGE_TYPES = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp'}
+PUBLIC_PAGE_SIZE = 20
+# Consecutive PDF text blocks are merged until a chunk reaches about this many characters,
+# so that retrieval works on paragraphs rather than on isolated titles or lines.
+CHUNK_TARGET_CHARS = 800
+SIGNED_URL_TTL = 3600
+
+
+def _repo_from_row(repo_data: Dict[str, Any]) -> DocumentRepository:
+    data = {k: v for k, v in repo_data.items() if v is not None and k in DocumentRepository.model_fields}
+    return DocumentRepository(**data)
+
 
 def create_document_repository(name: str, description: str, owner_id: str, categories: List[str], is_public: bool) -> str:
-    repo_id = str(uuid.uuid4())
     repo = DocumentRepository(
-        repo_id=repo_id,
         name=name,
         description=description,
         owner_id=owner_id,
         categories=categories,
         is_public=is_public
     )
-    repo_data = repo.dict()
-    response = db.table('document_repositories').insert(repo_data).execute()
-    res_user = db.table('users').select('repositories').eq('user_id', owner_id).limit(1).execute()
-    current_docs = res_user.data[0]['repositories']
-    updated_docs = current_docs + [repo_id]
-    db.table('users').update({'repositories': updated_docs}).eq('user_id', owner_id).execute()
-    if len(response.data) > 0:
-        return repo_id
-    else:
+    db = get_db()
+    response = db.table('document_repositories').insert(repo.model_dump()).execute()
+    if not response.data:
         raise Exception("Failed to create the document repository")
+    res_user = db.table('users').select('repositories').eq('user_id', owner_id).limit(1).execute()
+    current = (res_user.data[0]['repositories'] or []) if res_user.data else []
+    db.table('users').update({'repositories': current + [repo.repo_id]}).eq('user_id', owner_id).execute()
+    return repo.repo_id
+
 
 def get_document_repository(repo_id: str) -> Optional[DocumentRepository]:
-    response = db.table('document_repositories').select('*').eq('repo_id', repo_id).eq('is_deleted', False).limit(1).execute()
-    if not response.data or len(response.data) == 0:
-        return None
-    repo_data = response.data[0]
-    return DocumentRepository(
-        repo_id=repo_data['repo_id'],
-        name=repo_data['name'],
-        description=repo_data['description'],
-        owner_id=repo_data['owner_id'],
-        is_public=repo_data['is_public'],
-        categories=repo_data['categories'],
-        created_at=repo_data['created_at'],
-        updated_at=repo_data['updated_at'],
-        documents=repo_data["documents"],
-        is_deleted=repo_data["is_deleted"],
-        banner=repo_data["banner"],
-        accesses=repo_data['accesses'],
-        likes=repo_data['likes'],
-        dislikes=repo_data['dislikes'],
-        bookmarks=repo_data['bookmarks'],
-        shares=repo_data['shares'],
-        number_of_indexed=repo_data['number_of_indexed'],
-        related_repositories=repo_data['related_repositories']
-    )
+    response = get_db().table('document_repositories').select('*').eq('repo_id', repo_id).eq('is_deleted', False).limit(1).execute()
+    return _repo_from_row(response.data[0]) if response.data else None
+
 
 def get_list_of_repositories(repo_ids: List[str]) -> List[DocumentRepository]:
-    repositories = []
-    for repo_id in repo_ids:
-        repository = get_document_repository(repo_id)
-        if repository:
-            repositories.append(repository)
-    return repositories
+    if not repo_ids:
+        return []
+    response = get_db().table('document_repositories').select('*').in_('repo_id', repo_ids) \
+        .eq('is_deleted', False).order('updated_at', desc=True).execute()
+    return [_repo_from_row(row) for row in response.data or []]
+
 
 def get_public_repositories(page: int, user_id: str, query: str = None) -> List[DocumentRepository]:
-    if query:
-        response = db.table('document_repositories').select('*').eq('is_public', True).eq('is_deleted', False).neq('owner_id', user_id).gte('name', query).range(20*(page-1), 20*page).execute()
-    else:
-        response = db.table('document_repositories').select('*').eq('is_public', True).eq('is_deleted', False).neq('owner_id', user_id).range(20*(page-1), 20*page).execute()  
-    repositories = []
-    for repo_data in response.data:
-        repository = DocumentRepository(
-            repo_id=repo_data['repo_id'],
-            name=repo_data['name'],
-            description=repo_data['description'],
-            owner_id=repo_data['owner_id'],
-            is_public=repo_data['is_public'],
-            categories=repo_data['categories'],
-            created_at=repo_data['created_at'],
-            updated_at=repo_data['updated_at'],
-            documents=repo_data["documents"],
-            is_deleted=repo_data["is_deleted"],
-            banner=repo_data["banner"],
-            accesses=repo_data['accesses'],
-            likes=repo_data['likes'],
-            dislikes=repo_data['dislikes'],
-            bookmarks=repo_data['bookmarks'],
-            shares=repo_data['shares'],
-            number_of_indexed=repo_data['number_of_indexed'],
-            related_repositories=repo_data['related_repositories']
-        )
-        repositories.append(repository)
-    return repositories
+    request = get_db().table('document_repositories').select('*') \
+        .eq('is_public', True).eq('is_deleted', False).neq('owner_id', user_id)
+    if query and query.strip():
+        # Escape the LIKE wildcards so the search is a plain "contains".
+        term = query.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        request = request.ilike('name', f'%{term}%')
+    start = PUBLIC_PAGE_SIZE * (page - 1)
+    response = request.order('updated_at', desc=True).range(start, start + PUBLIC_PAGE_SIZE - 1).execute()
+    return [_repo_from_row(row) for row in response.data or []]
 
-def update_document_repository(repo_id: str, name: str = None, description: str = None, 
-                              is_public: bool = None, categories: List[str] = None, is_deleted: bool = None,
-                              documents: List[str] = None, is_indexed: bool = None) -> bool:
-    response = db.table('document_repositories').select('*').eq('repo_id', repo_id).limit(1).execute()
-    if not response.data or len(response.data) == 0:
+
+def update_document_repository(repo_id: str, name: str = None, description: str = None,
+                               is_public: bool = None, categories: List[str] = None, is_deleted: bool = None,
+                               documents: List[str] = None, is_indexed: bool = None) -> bool:
+    db = get_db()
+    response = db.table('document_repositories').select('number_of_indexed').eq('repo_id', repo_id).limit(1).execute()
+    if not response.data:
         return False
-    update_data = {'updated_at': datetime.now().isoformat()}
+    update_data = {'updated_at': now_iso()}
     if name:
         update_data['name'] = name
-    if description:
+    # `is not None` rather than truthiness so a field can be cleared (empty
+    # description, no categories, last document removed).
+    if description is not None:
         update_data['description'] = description
     if is_public is not None:
         update_data['is_public'] = is_public
-    if categories:
+    if categories is not None:
         update_data['categories'] = categories
     if is_deleted is not None:
         update_data['is_deleted'] = is_deleted
-    if documents:
+    if documents is not None:
         update_data['documents'] = documents
     if is_indexed is not None:
-        if is_indexed:
-            update_data["number_of_indexed"] += 1
-        else:
-            update_data['number_of_indexed'] -=1
+        current = response.data[0].get('number_of_indexed') or 0
+        update_data['number_of_indexed'] = max(current + (1 if is_indexed else -1), 0)
     response = db.table('document_repositories').update(update_data).eq('repo_id', repo_id).execute()
     return len(response.data) > 0
 
+
 def update_repository_access(repo_id: str, access: Access, access_type: str) -> bool:
-    response = db.table('document_repositories').select('*').eq('repo_id', repo_id).limit(1).execute()
-    if not response.data or len(response.data) == 0 or access_type not in ['accesses', 'likes', 'dislikes', 'bookmarks', 'shares']:
+    if access_type not in ACCESS_TYPES:
         return False
-    if response.data[0]['owner_id'] == access.access_id:
+    db = get_db()
+    response = db.table('document_repositories').select('*').eq('repo_id', repo_id).limit(1).execute()
+    if not response.data:
         return False
     repo_data = response.data[0]
-    update_data = {
-        'accesses': repo_data['accesses'], 
-        'likes': repo_data['likes'], 
-        'dislikes': repo_data['dislikes'], 
-        'bookmarks': repo_data['bookmarks'], 
-        'shares': repo_data['shares']
-    }
-    if access_type == 'accesses':
-        update_data['accesses'].append(access.dict())
-    elif access_type == 'likes':
-        is_like = False
-        for dislike in update_data['dislikes']:
-            if dislike["access_id"] == access.access_id:
-                update_data['dislikes'].remove(dislike)
-        for like in update_data['likes']:
-            if like["access_id"] == access.access_id:
-                is_like = True
-                update_data['likes'].remove(like)
-        if not is_like:
-            update_data['likes'].append(access.dict())
-    elif access_type == 'dislikes':
-        is_dislike = False
-        for like in update_data['likes']:
-            if like["access_id"] == access.access_id:
-                update_data['likes'].remove(like)
-        for dislike in update_data['dislikes']:
-            if dislike["access_id"] == access.access_id:
-                is_dislike = True
-                update_data['dislikes'].remove(dislike)
-        if not is_dislike:
-            update_data['dislikes'].append(access.dict())
-    elif access_type == 'bookmarks':
-        is_bookmark = False
-        for bookmark in update_data['bookmarks']:
-            if bookmark["access_id"] == access.access_id:
-                is_bookmark = True
-                update_data['bookmarks'].remove(bookmark)
-        if not is_bookmark:
-            update_data['bookmarks'].append(access.dict())
-    elif access_type == 'shares':
-        update_data['shares'].append(access.dict())
+    if repo_data['owner_id'] == access.access_id:
+        return False
+    update_data = {key: list(repo_data.get(key) or []) for key in ACCESS_TYPES}
+    opposite = {'likes': 'dislikes', 'dislikes': 'likes'}.get(access_type)
+    update_data[access_type] = toggle_access(update_data[access_type], access, access_type,
+                                             update_data[opposite] if opposite else None)
     update_response = db.table('document_repositories').update(update_data).eq('repo_id', repo_id).execute()
     return len(update_response.data) > 0
 
-def update_repository_banner(owner_id: str, repo_id: str, file_path:str) -> bool:
-    with open(file_path, 'rb') as f:
-        file_data = f.read()
-    file_size = len(file_data)
-    if file_size > 5 * 1024 * 1024:
-        return None
-    file_options = {}
-    extension = os.path.splitext(file_path)[1].lower()
-    mime_types = {
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.png': 'image/png'
-    }
-    file_options['content-type'] = mime_types.get(extension, 'application/octet-stream')
-    storage_path = f"banners/{owner_id}/{repo_id}/{file_path.split('.')[0]}.{extension}"
-    db.storage.from_('banners').upload(
-        path=f"{owner_id}/{repo_id}/{file_path.split('.')[0]}.{extension}",
+
+def _upload_image(bucket: str, folder: str, file_data: bytes, filename: str) -> str:
+    """Upload an image to `bucket` and return its stored path ("<bucket>/<folder>/<uuid>.<ext>")."""
+    extension = os.path.splitext(filename)[1].lower()
+    if extension not in IMAGE_TYPES:
+        raise ValueError("Unsupported image type. Use JPG, PNG or WEBP.")
+    if len(file_data) > MAX_IMAGE_SIZE:
+        raise ValueError("The image is too large (max 5 MB).")
+    object_path = f"{folder}/{uuid.uuid4()}{extension}"
+    get_db().storage.from_(bucket).upload(
+        path=object_path,
         file=file_data,
-        file_options=file_options
+        file_options={'content-type': IMAGE_TYPES[extension]}
     )
-    update_response = db.table('document_repositories').update({'banner': storage_path}).eq('repo_id', repo_id).execute()
+    return f"{bucket}/{object_path}"
+
+
+def update_repository_banner(owner_id: str, repo_id: str, file_data: bytes, filename: str) -> bool:
+    storage_path = _upload_image('banners', f"{owner_id}/{repo_id}", file_data, filename)
+    update_response = get_db().table('document_repositories').update({'banner': storage_path}).eq('repo_id', repo_id).execute()
     return len(update_response.data) > 0
 
-def load_repository_banner(banner: str) -> Optional[str]:
-    banner = banner.lstrip('banners/')
-    url = db.storage.from_('banners').create_signed_url(
-        path=banner,
-        expires_in=3600
-    )
-    return url['signedURL']
 
-def upload_document(file_data: bytes, filename: str, repo_id: str, owner_id: str, title: str = None, description: str = "", category: str = None) -> Optional[str]:
-    if not filename.lower().endswith('.pdf'):
-        return None
-    file_size = len(file_data)
-    if file_size > 25 * 1024 * 1024:
-        return None
-    doc_id = str(uuid.uuid4())
-    doc_id
-    word_count = 0
-    page_count = 0
-    chunks = []
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        temp_file.write(file_data)
-        temp_path = temp_file.name
+def update_document_cover(owner_id: str, doc_id: str, file_data: bytes, filename: str) -> bool:
+    storage_path = _upload_image('covers', f"{owner_id}/{doc_id}", file_data, filename)
+    update_response = get_db().table('documents').update({'cover': storage_path}).eq('doc_id', doc_id).execute()
+    return len(update_response.data) > 0
+
+
+@st.cache_data(ttl=SIGNED_URL_TTL - 300, show_spinner=False)
+def _signed_url(bucket: str, stored_path: str) -> Optional[str]:
+    # removeprefix, not lstrip: lstrip('banners/') strips any of those *characters*,
+    # which mangled paths whose owner id starts with e.g. "a", "b", "e" or "s".
+    object_path = stored_path.removeprefix(f"{bucket}/")
     try:
-        with pdf.open(temp_path) as f:
-            page_count = len(f)
-            for page_num in range(page_count):
-                page = f[page_num].get_textpage()
-                page_text = page.extractWORDS()
-                word_count += len(page_text)
-                pdf_blocks = page.extractBLOCKS()
-                blocks = [block[4] for block in pdf_blocks if block[6] == 0]
-                chunk = generate_embeddings(blocks, page_num)
-                chunks.extend(chunk)
-    finally:
-        os.unlink(temp_path)
+        url = get_db().storage.from_(bucket).create_signed_url(path=object_path, expires_in=SIGNED_URL_TTL)
+    except Exception:
+        return None
+    return url.get("signedURL") or url.get("signedUrl")
+
+
+def load_repository_banner(banner: str) -> Optional[str]:
+    return _signed_url('banners', banner)
+
+
+def load_document_cover(cover: str) -> Optional[str]:
+    return _signed_url('covers', cover)
+
+
+def get_document_download_url(file_path: str) -> Optional[str]:
+    return _signed_url('documents', file_path)
+
+
+def group_blocks(blocks: List[str], target_chars: int = CHUNK_TARGET_CHARS) -> List[str]:
+    """Merge consecutive text blocks into chunks of roughly `target_chars` characters."""
+    groups, current = [], ""
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        if current and len(current) + len(block) > target_chars:
+            groups.append(current)
+            current = block
+        else:
+            current = f"{current}\n{block}" if current else block
+    if current:
+        groups.append(current)
+    return groups
+
+
+def extract_pdf(file_data: bytes) -> Tuple[int, int, List[Chunk]]:
+    """Return (page_count, word_count, chunks) for a PDF."""
+    word_count = 0
+    chunks: List[Chunk] = []
+    with pymupdf.open(stream=file_data, filetype="pdf") as pdf:
+        if pdf.needs_pass:
+            raise ValueError("Password-protected PDFs are not supported.")
+        for page_num, page in enumerate(pdf):
+            word_count += len(page.get_text("words"))
+            blocks = [block[4] for block in page.get_text("blocks") if block[6] == 0]
+            chunks.extend(generate_embeddings(group_blocks(blocks), page_num))
+        return len(pdf), word_count, chunks
+
+
+def upload_document(file_data: bytes, filename: str, repo_id: str, owner_id: str, title: str = None,
+                    description: str = "", category: str = None) -> Tuple[str, int]:
+    """Store a PDF, index its text, and add it to the repository.
+
+    Returns (doc_id, number_of_indexed_chunks). Raises ValueError on invalid input.
+    """
+    if not filename.lower().endswith('.pdf'):
+        raise ValueError("Only PDF files are supported.")
+    if len(file_data) > MAX_DOCUMENT_SIZE:
+        raise ValueError("The file is too large (max 10 MB).")
+    try:
+        page_count, word_count, chunks = extract_pdf(file_data)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"This file could not be read as a PDF ({e}).") from e
+    db = get_db()
+    doc_id = str(uuid.uuid4())
     storage_path = f"documents/{owner_id}/{doc_id}.pdf"
     db.storage.from_('documents').upload(
         path=f"{owner_id}/{doc_id}.pdf",
         file=file_data,
-        file_options={"content_type": "application/pdf"}
+        file_options={"content-type": "application/pdf"}
     )
     doc = Document(
-        title=title if title else filename.split('.')[0],
+        title=title or os.path.splitext(filename)[0],
         doc_id=doc_id,
         page_count=page_count,
         word_count=word_count,
-        file_size=file_size,
+        file_size=len(file_data),
         file_path=storage_path,
         owner_id=owner_id,
         original_repo=repo_id,
         description=description,
         category=category
     )
-    doc_data = doc.dict()
-    db.table('documents').insert(doc_data).execute()
+    db.table('documents').insert(doc.model_dump()).execute()
+    rows = [{
+        'chunk_id': f"doc_{doc_id}_chunk_{i}",
+        'document_id': doc_id,
+        'position': chunk.position,
+        'page': chunk.page,
+        'text': chunk.text,
+        'embedding': chunk.embedding
+    } for i, chunk in enumerate(chunks)]
+    for i in range(0, len(rows), 200):
+        db.table('chunks').insert(rows[i:i + 200]).execute()
     res_repo = db.table('document_repositories').select('documents').eq('repo_id', repo_id).limit(1).execute()
-    current_docs = res_repo.data[0]['documents']
-    updated_docs = current_docs + [doc_id]
-    db.table('document_repositories').update({'documents': updated_docs}).eq('repo_id', repo_id).execute()
-    for i, chunk in enumerate(chunks):
-        chunk_id = f"doc_{doc_id}_chunk_{i}"
-        db.table('chunks').insert({
-            'chunk_id': chunk_id,
-            'document_id': doc_id,
-            'position': chunk.position,
-            'page': chunk.page,
-            'text': chunk.text,
-            'embedding': chunk.embedding
-        }).execute()
-    return doc_id
+    current = (res_repo.data[0]['documents'] or []) if res_repo.data else []
+    db.table('document_repositories').update({'documents': current + [doc_id], 'updated_at': now_iso()}) \
+        .eq('repo_id', repo_id).execute()
+    return doc_id, len(chunks)
 
-def update_document(doc_id: str, title: str = None, description: str = None, 
-                   category: str = None, related_documents: List[str] = None, is_deleted: bool = None) -> bool:
-    response = db.table('documents').select('*').eq('doc_id', doc_id).limit(1).execute()
-    if not response.data or len(response.data) == 0:
-        return False
+
+def update_document(doc_id: str, title: str = None, description: str = None,
+                    category: str = None, related_documents: List[str] = None, is_deleted: bool = None) -> bool:
     update_data = {}
     if title:
         update_data['title'] = title
-    if description:
+    if description is not None:
         update_data['description'] = description
-    if category:
-        update_data['category'] = category
-    if related_documents:
+    if category is not None:
+        update_data['category'] = category or None
+    if related_documents is not None:
         update_data['related_documents'] = related_documents
     if is_deleted is not None:
         update_data['is_deleted'] = is_deleted
-    update_response = db.table('documents').update(update_data).eq('doc_id', doc_id).execute()
+    if not update_data:
+        return False
+    update_response = get_db().table('documents').update(update_data).eq('doc_id', doc_id).execute()
     return len(update_response.data) > 0
+
+
+def _document_from_row(doc_data: Dict[str, Any]) -> Document:
+    data = {k: v for k, v in doc_data.items() if v is not None and k in Document.model_fields}
+    return Document(**data)
+
 
 def get_document(doc_id: str) -> Optional[Document]:
-    response = db.table('documents').select('*').eq('doc_id', doc_id).eq('is_deleted', False).limit(1).execute()
-    if not response.data or len(response.data) == 0:
-        return None
-    doc_data = response.data[0]
-    return Document(
-        doc_id=doc_data['doc_id'],
-        title=doc_data['title'],
-        description=doc_data['description'],
-        owner_id=doc_data['owner_id'],
-        file_path=doc_data['file_path'],
-        file_size=doc_data['file_size'],
-        upload_date=doc_data['upload_date'],
-        category=doc_data['category'],
-        word_count=doc_data['word_count'],
-        page_count=doc_data['page_count'],
-        related_documents=doc_data['related_documents'],
-        original_repo=doc_data['original_repo'],
-        type=doc_data["type"],
-        is_deleted=doc_data["is_deleted"],
-        cover=doc_data["cover"]
-    )
+    response = get_db().table('documents').select('*').eq('doc_id', doc_id).eq('is_deleted', False).limit(1).execute()
+    return _document_from_row(response.data[0]) if response.data else None
+
 
 def get_list_of_documents(doc_ids: List[str]) -> List[Document]:
-    documents = []
-    for doc_id in doc_ids:
-        document = get_document(doc_id)
-        if document:
-            documents.append(document)
-    return documents
+    if not doc_ids:
+        return []
+    response = get_db().table('documents').select('*').in_('doc_id', doc_ids).eq('is_deleted', False).execute()
+    by_id = {row['doc_id']: _document_from_row(row) for row in response.data or []}
+    return [by_id[d] for d in doc_ids if d in by_id]
 
-def update_document_cover(owner_id: str, doc_id: str, file_path:str) -> bool:
-    with open(file_path, 'rb') as f:
-        file_data = f.read()
-    file_options = {}
-    extension = os.path.splitext(file_path)[1].lower()
-    mime_types = {
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.png': 'image/png'
-    }
-    file_options['content-type'] = mime_types.get(extension, 'application/octet-stream')
-    storage_path = f"covers/{owner_id}/{doc_id}/{file_path.split('.')[0]}.{extension}"
-    db.storage.from_('covers').upload(
-        path=f"{owner_id}/{doc_id}/{file_path.split('.')[0]}.{extension}",
-        file=file_data,
-        file_options=file_options
-    )
-    update_response = db.table('documents').update({'cover': storage_path}).eq('doc_id', doc_id).execute()
-    return len(update_response.data) > 0
 
-def load_document_cover(cover: str) -> Optional[str]:
-    cover = cover.lstrip('covers/')
-    url = db.storage.from_('covers').create_signed_url(
-        path=cover,
-        expires_in=3600
-    )
-    return url["signedURL"]
-
-def get_document_download_url(file_path: str) -> Optional[str]:
-    file_path = file_path.lstrip('documents/')
-    url = db.storage.from_('documents').create_signed_url(
-        path=file_path,
-        expires_in=3600
-    )
-    return url["signedURL"]
-
+@st.cache_data(ttl=600, show_spinner=False)
 def get_owner_name(user_id: str) -> Optional[str]:
-    response = db.table('users').select('username').eq('user_id', user_id).limit(1).execute()
+    response = get_db().table('users').select('username').eq('user_id', user_id).limit(1).execute()
     return response.data[0]['username'] if response.data else None
 
+
+@st.cache_data(ttl=600, show_spinner=False)
 def get_original_repo(repo_id: str) -> Optional[str]:
-    response = db.table('document_repositories').select('name').eq('repo_id', repo_id).eq('is_deleted', False).limit(1).execute()
+    response = get_db().table('document_repositories').select('name').eq('repo_id', repo_id).eq('is_deleted', False).limit(1).execute()
     return response.data[0]['name'] if response.data else None
-    

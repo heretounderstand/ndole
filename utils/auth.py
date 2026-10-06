@@ -1,27 +1,39 @@
-import random
-import string
 import re
-from datetime import datetime
-from typing import Optional, Tuple, Dict
-from model import User, LearningPreference
-from utils.data import initialize_supabase
+import secrets
+import string
+from typing import Any, Dict, Optional, Tuple
+from model import User, now_iso
+from utils.data import get_auth_client, get_db
 
-db = initialize_supabase()
+EMAIL_DOMAIN = "ndole.cm"
+SPECIAL_CHARS = "!@#$%^&*(),.?:{}|<>"
+
+
+def _email(username: str) -> str:
+    return f"{username}@{EMAIL_DOMAIN}"
+
 
 def username_exists(username: str) -> bool:
-    response = db.table('users').select('username').eq('username', username).limit(1).execute()
-    if len(response.data) > 0:
-        return True
-    return False
+    response = get_db().table('users').select('username').eq('username', username).limit(1).execute()
+    return len(response.data) > 0
 
-def validate_username(username: str) -> Tuple[bool, str]:
+
+def validate_username_format(username: str) -> Tuple[bool, str]:
     if len(username) < 4 or len(username) > 20:
         return False, "The username must be between 4 and 20 characters."
-    if not re.match(r'^[a-zA-Z0-9_]+$', username):
+    if not re.fullmatch(r'[a-zA-Z0-9_]+', username):
         return False, "The username can only contain letters, numbers and underscores (_)."
+    return True, ""
+
+
+def validate_username(username: str) -> Tuple[bool, str]:
+    valid, message = validate_username_format(username)
+    if not valid:
+        return valid, message
     if username_exists(username):
         return False, "This username is already taken."
     return True, ""
+
 
 def validate_password(password: str) -> Tuple[bool, str]:
     if len(password) < 8:
@@ -32,35 +44,29 @@ def validate_password(password: str) -> Tuple[bool, str]:
         return False, "Password must contain at least one lowercase letter."
     if not any(c.isdigit() for c in password):
         return False, "The password must contain at least one number."
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+    if not any(c in SPECIAL_CHARS + '"' for c in password):
         return False, "The password must contain at least one special character."
     return True, ""
 
+
 def generate_username() -> str:
-    """Génère un nom d'utilisateur unique et valide"""
     adjectives = ["Brave", "Clever", "Dynamic", "Eager", "Friendly", "Gentle", "Happy", "Intelligent", "Jovial", "Kind"]
     nouns = ["Explorer", "Scholar", "Pioneer", "Learner", "Thinker", "Reader", "Student", "Innovator", "Champion", "Master"]
     while True:
-        username = f"{random.choice(adjectives)}{random.choice(nouns)}{random.randint(1, 999)}"
-        if not username_exists(username):
+        username = f"{secrets.choice(adjectives)}{secrets.choice(nouns)}{secrets.randbelow(9999) + 1}"
+        if len(username) <= 20 and not username_exists(username):
             return username
 
-def generate_password(length: int = 12) -> str:
-    uppercase = string.ascii_uppercase
-    lowercase = string.ascii_lowercase
-    digits = string.digits
-    special = "!@#$%^&*(),.?:{}|<>"
-    password = [
-        random.choice(uppercase),
-        random.choice(lowercase),
-        random.choice(digits),
-        random.choice(special)
-    ]
-    all_chars = uppercase + lowercase + digits + special
-    for _ in range(length - 4):
-        password.append(random.choice(all_chars))
-    random.shuffle(password)
+
+def generate_password(length: int = 14) -> str:
+    # `secrets`, not `random`: generated passwords must not be predictable.
+    pools = [string.ascii_uppercase, string.ascii_lowercase, string.digits, SPECIAL_CHARS]
+    password = [secrets.choice(pool) for pool in pools]
+    all_chars = "".join(pools)
+    password += [secrets.choice(all_chars) for _ in range(length - len(pools))]
+    secrets.SystemRandom().shuffle(password)
     return ''.join(password)
+
 
 def register_user(username: str, password: str) -> Tuple[bool, str, Optional[User]]:
     username_valid, username_error = validate_username(username)
@@ -70,90 +76,85 @@ def register_user(username: str, password: str) -> Tuple[bool, str, Optional[Use
     if not password_valid:
         return False, password_error, None
     try:
-        email = f"{username}@ndole.cm"
-        auth_response = db.auth.sign_up({
-            "email": email,
+        auth_response = get_auth_client().auth.sign_up({
+            "email": _email(username),
             "password": password,
         })
-        user_id = auth_response.user.id
-        user = User(
-            user_id=user_id,
-            username=username
-        )
-        user_data = user.dict()
-        db.table('users').insert(user_data).execute()
+        if auth_response.user is None:
+            return False, "Registration failed. Please try again.", None
+        user = User(user_id=auth_response.user.id, username=username)
+        get_db().table('users').insert(user.model_dump()).execute()
         return True, "Registration successful!", user
     except Exception as e:
-        if "email already registered" in str(e).lower():
-            return False, "Error while registering: This email already exists.", None
-        else:
-            return False, f"Error while registering: {str(e)}", None
-    except Exception as e:
-        return False, f"Error during registration: {str(e)}", None
+        if "already registered" in str(e).lower():
+            return False, "This username is already taken.", None
+        return False, f"Error while registering: {e}", None
+
+
+def _authenticate(username: str, password: str) -> Optional[str]:
+    """Return the auth user id if the credentials are valid."""
+    try:
+        auth_response = get_auth_client().auth.sign_in_with_password({
+            "email": _email(username),
+            "password": password,
+        })
+    except Exception:
+        return None
+    return auth_response.user.id if auth_response.user else None
+
 
 def login_user(username: str, password: str) -> Tuple[bool, str, Optional[User]]:
+    username = username.strip()
+    if not username or not password:
+        return False, "Please enter your username and password.", None
     try:
-        email = f"{username}@ndole.cm"
-        try:
-            auth_response = db.auth.sign_in_with_password(
-                {
-                    "email": email, 
-                    "password": password,
-                }
-            )
-            if auth_response.user == None:
-                return False, "Incorrect username or password.", None
-            user_id = auth_response.user.id
-            current_time = datetime.now().isoformat()
-            user_response = db.table('users').select('*').eq('user_id', user_id).limit(1).execute()
-            if len(user_response.data) == 0:
-                return False, "User profile not found.", None
-            user_data = user_response.data[0]
-            db.table('users').update({'last_login': current_time}).eq('user_id', user_id).execute()
-            user = User(
-                user_id=user_id,
-                username=username,
-                created_at=user_data.get('created_at'),
-                last_login=current_time,
-                learning_preferences=LearningPreference(**user_data.get('learning_preferences')) if user_data.get('learning_preferences') else LearningPreference(),
-                document_accessed=user_data.get('document_accessed',[]),
-                liked_documents=user_data.get('liked_documents', []),
-                disliked_documents=user_data.get('disliked_documents', []),
-                bookmarked_documents=user_data.get('bookmarked_documents', []),
-                shared_documents=user_data.get('shared_documents', []),
-                experience_points=user_data.get('experience_points', 0),
-                profile_picture=user_data.get('profile_picture', ""),
-                telegram_id=user_data.get('telegram_id'),
-                repositories=user_data.get('repositories', []),
-                chat_histories=user_data.get('chat_histories', []),
-                badges=user_data.get('badges', []),
-                daily_challenges=user_data.get('daily_challenges', {}),
-                study_stats=user_data.get('study_stats', []),
-                followers=user_data.get('followers', []),
-                following=user_data.get('following', []),
-                is_deleted=user_data.get('is_deleted', False),
-                notification_preferences=user_data.get('notification_preferences', {
-                    "study_reminders": True,
-                    "new_content": True,
-                    "achievement_alerts": True,
-                    "challenge_reminders": True,
-                })
-            )
-            return True, "Connection successful!", user
-        except Exception as e:
-            return False, f"Error checking user: {str(e)}", None
+        user_id = _authenticate(username, password)
+        if not user_id:
+            return False, "Incorrect username or password.", None
+        db = get_db()
+        user_response = db.table('users').select('*').eq('user_id', user_id).limit(1).execute()
+        if not user_response.data:
+            return False, "User profile not found.", None
+        user_data = user_response.data[0]
+        if user_data.get('is_deleted'):
+            return False, "This account has been deleted.", None
+        current_time = now_iso()
+        db.table('users').update({'last_login': current_time}).eq('user_id', user_id).execute()
+        user = User.from_row({**user_data, 'last_login': current_time})
+        return True, "Connection successful!", user
     except Exception as e:
-        return False, f"Error while connecting: {str(e)}", None
+        return False, f"Error while connecting: {e}", None
+
+
+def change_password(username: str, current_password: str, new_password: str) -> Tuple[bool, str]:
+    valid, message = validate_password(new_password)
+    if not valid:
+        return False, message
+    client = get_auth_client()
+    try:
+        client.auth.sign_in_with_password({"email": _email(username), "password": current_password})
+    except Exception:
+        return False, "Your current password is incorrect."
+    try:
+        client.auth.update_user({"password": new_password})
+        return True, "Password updated."
+    except Exception as e:
+        return False, f"Could not update the password: {e}"
+    finally:
+        try:
+            client.auth.sign_out({"scope": "local"})
+        except Exception:
+            pass
+
 
 def generate_credentials() -> Dict[str, str]:
-    username = generate_username()
-    password = generate_password()
     return {
-        "username": username,
-        "password": password
+        "username": generate_username(),
+        "password": generate_password()
     }
 
-def check_credentials(username: str, password: str) -> Dict[str, any]:
+
+def check_credentials(username: str, password: str) -> Dict[str, Any]:
     username_valid, username_message = validate_username(username)
     password_valid, password_message = validate_password(password)
     return {

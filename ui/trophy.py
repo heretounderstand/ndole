@@ -1,18 +1,14 @@
 import streamlit as st
 from typing import Dict, List
 from model import Badge
-from utils.badge import BADGES, get_earned_badges
+from utils.badge import BADGES, BADGE_TYPES, get_earned_badges
 from utils.user import update_user_badges
 
 def display_badges():
     st.title("🏆 My Badges")
     st.markdown("---")
-    if hasattr(st.session_state, 'user') and st.session_state.user:
-        user_stats = st.session_state.user.get_total_stats()
-        earned_badges = get_earned_badges(user_stats)
-    else:
-        st.warning("⚠️ User not logged in")
-        return
+    user_stats = st.session_state.user.get_total_stats()
+    earned_badges = get_earned_badges(user_stats)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric(
@@ -31,7 +27,7 @@ def display_badges():
         st.metric(
             label="💎 Unlocked Types",
             value=len(badge_types),
-            delta="out of 5"
+            delta=f"out of {len(BADGE_TYPES)}"
         )
     with col4:
         diamond_badges = len([b for b in earned_badges if b.badge_type == "diamond"])
@@ -51,8 +47,10 @@ def display_badges():
         display_all_badges(earned_badges, user_stats)
     with tab3:
         display_badge_statistics(earned_badges, user_stats)
-    if len(earned_badges) != len(st.session_state.user.badges):
-        update_user_badges(st.session_state.user.user_id, [badge.badge_id for badge in earned_badges])
+    earned_ids = [badge.badge_id for badge in earned_badges]
+    if set(earned_ids) != set(st.session_state.user.badges):
+        if update_user_badges(st.session_state.user.user_id, earned_ids):
+            st.session_state.user.badges = earned_ids
 
 def get_badge_color(badge_type: str) -> str:
     colors = {
@@ -82,7 +80,7 @@ def display_badge_card(badge: Badge, is_earned: bool = True, progress: float = N
         <div style="text-align: center;">
             <div style="font-size: 3em; margin-bottom: 10px;">{badge.icon}</div>
             <h4 style="color: {color}; margin: 5px 0;">{badge.name}</h4>
-            <p style="color: #666; font-size: 0.9em; margin: 5px 0;">{badge.description}</p>
+            <p style="color: #9E9E9E; font-size: 0.9em; margin: 5px 0;">{badge.description}</p>
             <span style="
                 background-color: {color};
                 color: white;
@@ -100,7 +98,7 @@ def display_badge_card(badge: Badge, is_earned: bool = True, progress: float = N
             <div style="background-color: #e0e0e0; border-radius: 10px; height: 8px; overflow: hidden;">
                 <div style="background-color: {color}; height: 100%; width: {min(progress * 100, 100):.1f}%; transition: width 0.3s ease;"></div>
             </div>
-            <small style="color: #666;">{progress * 100:.1f}% completed</small>
+            <small style="color: #9E9E9E;">{progress * 100:.1f}% completed</small>
         </div>
         """
     card_style += "</div>"
@@ -116,87 +114,13 @@ def display_earned_badges(earned_badges: List[Badge]):
         if badge.badge_type not in badges_by_type:
             badges_by_type[badge.badge_type] = []
         badges_by_type[badge.badge_type].append(badge)
-    type_order = ["diamond", "platinium", "gold", "silver", "bronze"]
-    for badge_type in type_order:
+    for badge_type in reversed(BADGE_TYPES):
         if badge_type in badges_by_type:
             st.markdown(f"#### {badge_type.title()} ({len(badges_by_type[badge_type])})")
             cols = st.columns(3)
             for i, badge in enumerate(badges_by_type[badge_type]):
                 with cols[i % 3]:
-                    st.markdown(display_badge_card(badge), unsafe_allow_html=True)
-
-def calculate_badge_progress(badge: Badge, stats: Dict) -> float:
-    try:
-        if badge.badge_type == "bronze":
-            order = 0 
-        elif badge.badge_type == "silver":
-            order = 1
-        elif badge.badge_type == "gold": 
-            order = 2
-        elif badge.badge_type == "platinium": 
-            order = 3
-        elif badge.badge_type == "diamond": 
-            order = 4  
-        if "study_" in badge.badge_id.lower():
-            targets = [3600, 36000, 180000, 360000, 900000]
-            current = stats.get("total_study_time", 0)
-            return current / targets[order]
-        elif "reader_" in badge.badge_id.lower():
-            targets = [1, 25, 100, 250, 500]
-            current = stats.get("documents_read", 0)
-            return current / targets[order]
-        elif "repo_" in badge.badge_id.lower():
-            targets = [1, 5, 20, 50, 100]
-            current = stats.get("repositories_created", 0)
-            return current / targets[order]
-        elif "explorer_" in badge.badge_id.lower():
-            targets = [1, 50, 150, 300, 500]
-            current = stats.get("repositories_accessed", 0)
-            return current / targets[order]
-        elif "teacher_" in badge.badge_id.lower():
-            targets = [1, 10, 25, 50, 100]
-            current = stats.get("couses_created", 0)
-            return current / targets[order]
-        elif "careful_" in badge.badge_id.lower():
-            targets = [[10, 0.7], [20, 0.8], [50, 0.95], [100, 0.98], [250, 0.995]]
-            current = [stats.get("questions_answered", 0), stats.get("correct_answers", 0) / stats.get("questions_answered", 0)]
-            if current[0] > targets[order][0]:
-                return current[1] / targets[order][1]
-        elif "chatter_" in badge.badge_id.lower():
-            targets = [1, 10, 30, 75, 150]
-            current = stats.get("chat_created", 0)
-            return current / targets[order]
-        elif "communicator_" in badge.badge_id.lower():
-            targets = [1, 100, 500, 1000, 2500]
-            current = stats.get("messages_sent", 0)
-            return current / targets[order]
-        elif "question_" in badge.badge_id.lower():
-            targets = [1, 10, 50, 200, 500]
-            current = stats.get("quizzes_created", 0)
-            return current / targets[order]
-        elif "quiz_" in badge.badge_id.lower():
-            targets = [1, 5, 25, 100, 500]
-            current = stats.get("quizzes_completed", 0)
-            return current / targets[order]
-        elif "routine_" in badge.badge_id.lower():
-            targets = [3, 7, 30, 100, 365]
-            current = stats.get("streak_days", 0)
-            return current / targets[order]
-        elif "xp_" in badge.badge_id.lower():
-            targets = [1000, 10000, 50000, 100000, 500000]
-            current = stats.get("xp_gained", 0)
-            return current / targets[order]
-        elif "content_" in badge.badge_id.lower():
-            targets = [5, 25, 100, 500, 1000]
-            current = stats.get("documents_uploaded", 0)
-            return current / targets[order]
-        elif "challenger_" in badge.badge_id.lower():
-            targets = [1, 10, 25, 50, 100]
-            current = stats.get("challenges_completed", 0)
-            return current / targets[order]
-        return 0.0
-    except:
-        return 0.0
+                    st.html(display_badge_card(badge))
 
 def display_all_badges(earned_badges: List[Badge], user_stats: Dict):
     st.markdown("### 🗂️ All Available Badges")
@@ -205,7 +129,7 @@ def display_all_badges(earned_badges: List[Badge], user_stats: Dict):
     with col1:
         filter_type = st.selectbox(
             "Filter by type",
-            ["All", "bronze", "silver", "gold", "platinium", "diamond"]
+            ["All"] + BADGE_TYPES
         )
     with col2:
         filter_status = st.selectbox(
@@ -237,7 +161,7 @@ def display_all_badges(earned_badges: List[Badge], user_stats: Dict):
             for i, badge in enumerate(filtered_badges):
                 with cols[i % 2]:
                     is_earned = badge.badge_id in earned_ids
-                    progress = None if is_earned else calculate_badge_progress(badge, user_stats)
+                    progress = None if is_earned else badge.progress(user_stats)
                     st.html(display_badge_card(badge, is_earned, progress))
 
 def display_badge_statistics(earned_badges: List[Badge], user_stats: Dict):
@@ -270,7 +194,7 @@ def display_badge_statistics(earned_badges: List[Badge], user_stats: Dict):
     next_badges = []
     for badge in BADGES:
         if badge.badge_id not in earned_ids:
-            progress = calculate_badge_progress(badge, user_stats)
+            progress = badge.progress(user_stats)
             if progress > 0:
                 next_badges.append((badge, progress))
     next_badges.sort(key=lambda x: x[1], reverse=True)
@@ -286,4 +210,4 @@ def display_badge_statistics(earned_badges: List[Badge], user_stats: Dict):
             with col3:
                 st.markdown(f"{progress * 100:.1f}%")
     else:
-        st.info("🎉 Congratulations! You're on track to unlock your next badges.")
+        st.info("🎯 Start using Ndolè to make progress toward your next badges.")
