@@ -2,17 +2,13 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from model import parse_dt
 from utils.user import get_user
 
 def display_statistics():
-    if 'user' not in st.session_state or st.session_state.user is None:
-        st.error("🔒 You must be logged in to access this page.")
-        return
-    user = get_user(st.session_state.user.user_id)
-    if user:
-        st.session_state.user = user
-    total_stats = user.get_total_stats() if user else None
+    user = get_user(st.session_state.user.user_id) or st.session_state.user
+    st.session_state.user = user
+    total_stats = user.get_total_stats()
     st.title("📊 My Statistics")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -24,12 +20,8 @@ def display_statistics():
             <p style="margin: 0;">{user.experience_points} XP / {user.calculate_level(is_next=True)} XP</p>
         </div>
         """, unsafe_allow_html=True)
-    current_level = user.calculate_level()
-    xp_for_current_level = sum(100 * i for i in range(1, current_level))
-    xp_for_next_level = user.calculate_level(is_next=True)
-    progress = (user.experience_points - xp_for_current_level) / (xp_for_next_level - xp_for_current_level)
-    st.progress(progress)
-    st.caption(f"Progress towards level {current_level + 1}")
+    st.progress(user.level_progress())
+    st.caption(f"Progress towards level {user.calculate_level() + 1}")
     if user.study_stats:
         latest_stats = user.study_stats[-1]
         st.markdown("### 📈 Overview")
@@ -68,7 +60,7 @@ def display_statistics():
         st.markdown("---")
         if len(user.study_stats) > 1:
             xp_history = [stats.xp_gained for stats in user.study_stats]
-            dates = [datetime.fromisoformat(stats.last_activity).strftime('%b %d') for stats in user.study_stats]
+            dates = [parse_dt(stats.last_activity).date() for stats in user.study_stats]
             fig_xp = px.line(
                 x=dates,
                 y=xp_history,
@@ -81,12 +73,12 @@ def display_statistics():
                 margin=dict(l=20, r=20, t=40, b=20),
                 template="plotly_dark"
             )
-            st.plotly_chart(fig_xp, use_container_width=True)
+            st.plotly_chart(fig_xp, width="stretch")
         else:
             st.info("Not enough data to display XP progression.")
         with st.expander("📂 Documents and Repositories"):
             if len(user.study_stats) > 1:
-                dates = [datetime.fromisoformat(stats.last_activity).strftime('%b %d') for stats in user.study_stats]
+                dates = [parse_dt(stats.last_activity).date() for stats in user.study_stats]
                 metrics = {
                     "Documents Read": [stats.documents_read for stats in user.study_stats],
                     "Documents Uploaded": [stats.documents_uploaded for stats in user.study_stats],
@@ -110,7 +102,7 @@ def display_statistics():
                     margin=dict(l=20, r=20, t=40, b=20),
                     legend_title="Activity"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.info("Not enough data to display activity evolution.")
             col1, col2 = st.columns(2)
@@ -129,7 +121,7 @@ def display_statistics():
                 )
                 fig_pie_docs.update_traces(textinfo='percent+label')
                 fig_pie_docs.update_layout(height=300, template="plotly_dark")
-                st.plotly_chart(fig_pie_docs, use_container_width=True)
+                st.plotly_chart(fig_pie_docs, width="stretch")
             with col2:
                 st.markdown("#### 🗃️ Repository Activity")
                 repo_labels = ['Repositories Created', 'Repositories Accessed']
@@ -145,10 +137,10 @@ def display_statistics():
                 )
                 fig_pie_repos.update_traces(textinfo='percent+label')
                 fig_pie_repos.update_layout(height=300, template="plotly_dark")
-                st.plotly_chart(fig_pie_repos, use_container_width=True)
+                st.plotly_chart(fig_pie_repos, width="stretch")
         with st.expander("💬 Chats"):
             if len(user.study_stats) > 1:
-                dates = [datetime.fromisoformat(stats.last_activity).strftime('%b %d') for stats in user.study_stats]
+                dates = [parse_dt(stats.last_activity).date() for stats in user.study_stats]
                 metrics = {
                     "Answered Questions": [stats.questions_answered for stats in user.study_stats],
                     "Correct Answers": [stats.correct_answers for stats in user.study_stats],
@@ -177,7 +169,7 @@ def display_statistics():
                     margin=dict(l=20, r=20, t=40, b=20),
                     legend_title="Metric"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
                 st.markdown("#### 🧭 Metric Distribution by Category")
                 categories = {
                     "Learning": ["Answered Questions", "Correct Answers", "Questions Asked"],
@@ -196,34 +188,37 @@ def display_statistics():
                                     'Value': total_value,
                                     'Label': f"{metric_name}<br>{total_value:,}"
                                 })
-                df = pd.DataFrame(treemap_data)
-                fig_treemap = px.treemap(
-                    df,
-                    path=['Category', 'Metric'],
-                    values='Value',
-                    color='Value',
-                    color_continuous_scale='Tealgrn',
-                    hover_data={'Value': ':,'}
-                )
-                fig_treemap.update_traces(
-                    textinfo="label+value",
-                    textfont_size=12,
-                    marker_line_width=2,
-                    marker_line_color='white'
-                )
-                fig_treemap.update_layout(
-                    title={
-                        'text': 'Study Metric Distribution by Category',
-                        'x': 0.5,
-                        'xanchor': 'center',
-                        'font': {'size': 16}
-                    },
-                    font=dict(family="Arial", size=10),
-                    height=600,
-                    margin=dict(t=60, l=20, r=20, b=20),
-                    template="plotly_dark"
-                )
-                st.plotly_chart(fig_treemap, use_container_width=True)
+                if not treemap_data:
+                    st.info("No activity to break down yet.")
+                else:
+                    df = pd.DataFrame(treemap_data)
+                    fig_treemap = px.treemap(
+                        df,
+                        path=['Category', 'Metric'],
+                        values='Value',
+                        color='Value',
+                        color_continuous_scale='Tealgrn',
+                        hover_data={'Value': ':,'}
+                    )
+                    fig_treemap.update_traces(
+                        textinfo="label+value",
+                        textfont_size=12,
+                        marker_line_width=2,
+                        marker_line_color='white'
+                    )
+                    fig_treemap.update_layout(
+                        title={
+                            'text': 'Study Metric Distribution by Category',
+                            'x': 0.5,
+                            'xanchor': 'center',
+                            'font': {'size': 16}
+                        },
+                        font=dict(family="Arial", size=10),
+                        height=600,
+                        margin=dict(t=60, l=20, r=20, b=20),
+                        template="plotly_dark"
+                    )
+                    st.plotly_chart(fig_treemap, width="stretch")
             else:
                 st.info("Not enough data to display activity metrics.")
         st.markdown("### 💡 Personalized Advice")
@@ -254,4 +249,4 @@ def display_statistics():
             st.metric("📅 Member Since", user.get_created_at().strftime('%d/%m/%Y'))
         with col3:
             st.metric("🏆 Level", user.calculate_level())
-    
+    

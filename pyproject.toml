@@ -1,0 +1,16 @@
+[project]
+name = "ndole"
+version = "1.0.0"
+description = "Educational AI platform: document repositories, RAG chat, course and quiz generation"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E9", "F", "B006", "B008", "E711", "E712", "E722"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

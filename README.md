@@ -23,18 +23,27 @@ This platform allows users to create document repositories, leverage RAG (Retrie
 
 ## Tech Stack
 
-- **Frontend**: Streamlit
-- **Backend**: Supabase (PostgreSQL with real-time capabilities)
+- **Frontend**: Streamlit (multipage app with `st.navigation`)
+- **Backend**: Supabase (PostgreSQL, Auth and Storage)
 - **Embeddings**: all-MiniLM-L6-v2 (lightweight and efficient)
-- **LLM**: Google Gemini
-- **Custom Feature**: Sympy Query Language (SQL-style mathematical operations)
+- **LLM**: Google Gemini through the `google-genai` SDK, with streamed answers
+- **Custom Feature**: Sympy Query Language (SQL-style mathematical operations), evaluated in a restricted sandbox
 
 ## Installation
+
+Requires Python 3.10 or newer.
 
 ```bash
 # Clone the repository
 git clone https://github.com/heretounderstand/ndole.git
 cd ndole
+
+# Create a virtual environment
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# Optional, on machines without a GPU: install the much smaller CPU-only PyTorch first
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # Install dependencies
 pip install -r requirements.txt
@@ -42,16 +51,27 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Create a `.streamlit/secrets.toml` file with the following configuration:
+### 1. Supabase
+
+1. Create a Supabase project.
+2. In the SQL editor, run [`supabase/schema.sql`](supabase/schema.sql). It creates the tables and the private `documents`, `banners` and `covers` Storage buckets.
+3. In **Authentication → Sign In / Providers → Email**, turn off **Confirm email**. Accounts use internal `<username>@ndole.cm` addresses that cannot receive mail.
+
+### 2. Secrets
+
+Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill it in:
 
 ```toml
 [supabase]
 url = "your_supabase_url"
-api_key = "your_supabase_api_key"
+api_key = "your_supabase_service_role_key"   # server-side only, never exposed to the browser
 
 [gemini]
 api_key = "your_gemini_api_key"
+# model = "gemini-flash-latest"   # optional; pin a model id for reproducible output
 ```
+
+`secrets.toml` is git-ignored. Never commit it.
 
 ## Usage
 
@@ -61,12 +81,23 @@ api_key = "your_gemini_api_key"
 streamlit run home.py
 ```
 
+### Running the tests
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+pytest
+```
+
+The tests cover the pure logic: the SymPy query language and its sandbox, study statistics, streaks and daily challenges, badges, quiz parsing and retrieval ranking. They need neither Supabase nor Gemini.
+
 ### Basic Workflow
 
-1. **Create Repository**: Upload and organize your educational documents
-2. **Configure RAG System**: Select which repositories to include in your knowledge base
-3. **Generate Content**: Use AI to create courses and quizzes from your documents
-4. **Mathematical Queries**: Use the custom Sympy Query Language for mathematical operations
+1. **Create Repository**: Upload and organize your educational documents (text-based PDFs, up to 10 MB)
+2. **Open it**: Click **🔎 View Repository**. Its documents become the assistant's knowledge base
+3. **Generate Content**: In **AI Assistant**, create a Q&A, course or exercise conversation
+4. **Mathematical Queries**: Use the custom Sympy Query Language in your messages (in a ```` ```sympy-query ```` block)
+5. **Personalize**: In **Settings**, set your level and preferred language. The assistant adapts its answers to them
 
 ### Sympy Query Language Examples
 
@@ -113,6 +144,17 @@ factor($)                             -- use last result as input
 diff($, x)                            -- use last result as first argument
 ```
 
+## Project Structure
+
+```
+home.py              Entry point: authentication, navigation, dashboard
+model.py             Pydantic data models (users, repositories, documents, chats, stats, badges)
+ui/                  Streamlit pages (repositories, assistant, statistics, badges, settings, game)
+utils/               Data access (Supabase), LLM, embeddings, SymPy query language, gamification
+supabase/schema.sql  Database schema
+tests/               Unit tests (pytest)
+```
+
 ## Contributing
 
 We welcome contributions from the community! Here's how you can help:
@@ -151,7 +193,7 @@ If you encounter any issues or have questions, please contact me directly:
 
 - Email: kadrilud@gmail.com
 - LinkedIn: [Your LinkedIn Profile](https://linkedin.com/in/adrien-kadji-bb1720279)
-- Create an [Adrien KADJI](https://github.com/heretounderstand/ndole/issues) on GitHub
+- Open an [issue on GitHub](https://github.com/heretounderstand/ndole/issues)
 
 ## Acknowledgments
 

@@ -1,32 +1,50 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
-from typing import Callable, List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
+
+
+def now_iso() -> str:
+    # Must be called per instance: `datetime.now().isoformat` passed as a factory
+    # was bound at import time, freezing every default timestamp.
+    return datetime.now(timezone.utc).isoformat()
+
+
+def parse_dt(value: str) -> datetime:
+    """Parse an ISO timestamp; legacy naive values are treated as UTC."""
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 class Message(BaseModel):
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     chat_id: str
-    received_at: str = Field(default_factory=datetime.now().isoformat)
+    received_at: str = Field(default_factory=now_iso)
     content: str
     is_assistant: bool = Field(default=False)
     is_deleted: bool = Field(default=False)
-    score: Dict[str, Any] = Field(default_factory= dict)
-    
+    score: Dict[str, Any] = Field(default_factory=dict)
+
     def get_received_at(self) -> datetime:
-        return datetime.fromisoformat(self.received_at)
-    
+        return parse_dt(self.received_at)
+
+
 class Access(BaseModel):
     access_id: str
-    access_time: str = Field(default_factory=datetime.now().isoformat)
-    
+    access_time: str = Field(default_factory=now_iso)
+
     def get_access_time(self) -> datetime:
-        return datetime.fromisoformat(self.access_time)
-    
+        return parse_dt(self.access_time)
+
+
 class Chunk(BaseModel):
     text: str
     embedding: List[float] = Field(default_factory=list)
     page: int
     position: int
+
 
 class LearningPreference(BaseModel):
     preferred_document: str = Field(default="")
@@ -36,14 +54,15 @@ class LearningPreference(BaseModel):
     daily_study_time: int = Field(default=0)
     difficulty_level: str = Field(default="beginner")
     preferred_content_types: List[str] = Field(default_factory=list)
-    
+
+
 class Document(BaseModel):
     doc_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str
     description: str = ""
     file_size: int
     file_path: str
-    upload_date: str = Field(default_factory=datetime.now().isoformat)
+    upload_date: str = Field(default_factory=now_iso)
     category: Optional[str] = None
     original_repo: str
     type: str = Field(default="simple_text")
@@ -53,9 +72,13 @@ class Document(BaseModel):
     owner_id: str
     is_deleted: bool = Field(default=False)
     related_documents: List[str] = Field(default_factory=list)
-    
+
     def get_upload_date(self) -> datetime:
-        return datetime.fromisoformat(self.upload_date)
+        return parse_dt(self.upload_date)
+
+
+ACCESS_TYPES = ('accesses', 'likes', 'dislikes', 'bookmarks', 'shares')
+
 
 class DocumentRepository(BaseModel):
     repo_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -64,8 +87,8 @@ class DocumentRepository(BaseModel):
     is_public: bool = Field(default=False)
     is_deleted: bool = Field(default=False)
     owner_id: str
-    created_at: str = Field(default_factory=datetime.now().isoformat)
-    updated_at: str = Field(default_factory=datetime.now().isoformat)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
     categories: List[str] = Field(default_factory=list)
     documents: List[str] = Field(default_factory=list)
     banner: Optional[str] = None
@@ -74,36 +97,21 @@ class DocumentRepository(BaseModel):
     dislikes: List[Access] = Field(default_factory=list)
     bookmarks: List[Access] = Field(default_factory=list)
     shares: List[Access] = Field(default_factory=list)
-    number_of_indexed: int = 0 
+    number_of_indexed: int = 0
     related_repositories: List[str] = Field(default_factory=list)
-    
+
     def get_created_at(self) -> datetime:
-        return datetime.fromisoformat(self.created_at)
-    
+        return parse_dt(self.created_at)
+
     def get_updated_at(self) -> datetime:
-        return datetime.fromisoformat(self.updated_at)
-    
+        return parse_dt(self.updated_at)
+
     def last_accessed(self, user_id: str, access_type: str) -> Optional[datetime]:
-        if access_type not in ['accesses', 'likes', 'dislikes', 'bookmarks', 'shares']:
-            return False
-        if access_type == 'accesses':
-            return max((access.get_access_time() for access in self.accesses if access.access_id == user_id), default=None)
-        elif access_type == 'likes':
-            for access in self.likes:
-                if access.access_id == user_id:
-                    return access.get_access_time()
-        elif access_type == 'dislikes':
-            for access in self.dislikes:
-                if access.access_id == user_id:
-                    return access.get_access_time()
-        elif access_type == 'bookmarks':
-            for access in self.bookmarks:
-                if access.access_id == user_id:
-                    return access.get_access_time()
-        elif access_type == 'shares':
-            return max((access.get_access_time() for access in self.shares if access.access_id == user_id), default=None)
-        return None
-    
+        if access_type not in ACCESS_TYPES:
+            return None
+        times = (a.get_access_time() for a in getattr(self, access_type) if a.access_id == user_id)
+        return max(times, default=None)
+
     def get_document_stats(self) -> Dict[str, Any]:
         return {
             "document_count": len(self.documents),
@@ -114,27 +122,30 @@ class DocumentRepository(BaseModel):
             "saved_count": len(self.bookmarks)
         }
 
+
 class ChatHistory(BaseModel):
     chat_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     owner_id: str
     title: str = "New Conversation"
-    created_at: str = Field(default_factory=datetime.now().isoformat)
+    created_at: str = Field(default_factory=now_iso)
     last_message: Optional[Message] = None
     messages: List[str] = Field(default_factory=list)
-    repo_source: str 
+    repo_source: str
     type: str
     is_deleted: bool = Field(default=False)
     mode: bool = Field(default=False)
-    
+
     def get_created_at(self) -> datetime:
-        return datetime.fromisoformat(self.created_at)
-    
+        return parse_dt(self.created_at)
+
+
 class StudyStats(BaseModel):
     total_study_time: int = 0
     documents_read: int = 0
     repositories_created: int = 0
     repositories_accessed: int = 0
     documents_uploaded: int = 0
+    # The "couses" typo is kept on purpose: it is the key stored in the database.
     couses_created: int = 0
     messages_sent: int = 0
     chat_created: int = 0
@@ -146,25 +157,58 @@ class StudyStats(BaseModel):
     streak_days: int = 0
     challenges_completed: int = 0
     xp_gained: int = 0
-    last_activity: str = Field(default_factory=datetime.now().isoformat)
+    last_activity: str = Field(default_factory=now_iso)
     subject_performance: Dict[str, float] = Field(default_factory=dict)
-    
+
     def get_last_activity(self) -> datetime:
-        return datetime.fromisoformat(self.last_activity)
-    
+        return parse_dt(self.last_activity)
+
+
+# Counters that add up from one event to the next (every int field except the streak).
+COUNTER_FIELDS = [
+    name for name, field in StudyStats.model_fields.items()
+    if field.annotation is int and name != "streak_days"
+]
+
+
 class Badge(BaseModel):
-    badge_id: str 
+    badge_id: str
     name: str
     description: str
     icon: str
     badge_type: str
-    condition: Callable
+    # A StudyStats counter, or "accuracy" for the correct/answered ratio.
+    stat_field: str
+    target: float
+    # Accuracy badges only count once this many questions have been answered.
+    min_questions: int = 0
+
+    def progress(self, stats: Dict[str, float]) -> float:
+        """Progress toward the badge, in [0, 1]."""
+        if not stats:
+            return 0.0
+        if self.stat_field == "accuracy":
+            answered = stats.get("questions_answered", 0)
+            if answered == 0:
+                return 0.0
+            accuracy = stats.get("correct_answers", 0) / answered
+            return min(answered / self.min_questions, 1.0) * min(accuracy / self.target, 1.0)
+        return min(stats.get(self.stat_field, 0) / self.target, 1.0)
+
+    def is_earned(self, stats: Dict[str, float]) -> bool:
+        if not stats:
+            return False
+        if self.stat_field == "accuracy":
+            answered = stats.get("questions_answered", 0)
+            return answered >= self.min_questions and stats.get("correct_answers", 0) / answered >= self.target
+        return stats.get(self.stat_field, 0) >= self.target
+
 
 class User(BaseModel):
     user_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     username: str
     profile_picture: Optional[str] = None
-    created_at: str = Field(default_factory=datetime.now().isoformat)
+    created_at: str = Field(default_factory=now_iso)
     last_login: Optional[str] = None
     learning_preferences: LearningPreference = Field(default_factory=LearningPreference)
     repositories: List[str] = Field(default_factory=list)
@@ -190,60 +234,41 @@ class User(BaseModel):
             "challenge_reminders": True,
         }
     )
-    
+
+    @classmethod
+    def from_row(cls, row: Dict[str, Any]) -> "User":
+        """Build a User from a `users` table row, ignoring NULL columns."""
+        data = {k: v for k, v in row.items() if v is not None and k in cls.model_fields}
+        return cls(**data)
+
     def get_created_at(self) -> datetime:
-        return datetime.fromisoformat(self.created_at)
-    
+        return parse_dt(self.created_at)
+
     def get_last_login(self) -> Optional[datetime]:
         if self.last_login:
-            return datetime.fromisoformat(self.last_login)
+            return parse_dt(self.last_login)
         return None
-    
+
+    @staticmethod
+    def xp_threshold(level: int) -> int:
+        """Total XP needed to reach `level`: 0, 100, 300, 600, ... (+100 per level)."""
+        return 50 * level * (level - 1)
+
     def calculate_level(self, is_next: bool = False) -> int:
         level = 1
-        xp_required = 100
-        while self.experience_points >= xp_required:
+        while self.experience_points >= self.xp_threshold(level + 1):
             level += 1
-            xp_required += 100 * level
-        return level if not is_next else xp_required
-    
+        return level if not is_next else self.xp_threshold(level + 1)
+
+    def level_progress(self) -> float:
+        """Fraction of the way from the current level to the next one, in [0, 1]."""
+        level = self.calculate_level()
+        start, end = self.xp_threshold(level), self.xp_threshold(level + 1)
+        return min(max((self.experience_points - start) / (end - start), 0.0), 1.0)
+
     def get_total_stats(self) -> Dict[str, float]:
         if not self.study_stats:
             return {}
-        total_stats = StudyStats()
-        for stats in self.study_stats:
-            total_stats.total_study_time += stats.total_study_time
-            total_stats.documents_read += stats.documents_read
-            total_stats.repositories_created += stats.repositories_created
-            total_stats.repositories_accessed += stats.repositories_accessed
-            total_stats.documents_uploaded += stats.documents_uploaded
-            total_stats.couses_created += stats.couses_created
-            total_stats.messages_sent += stats.messages_sent
-            total_stats.chat_created += stats.chat_created
-            total_stats.quizzes_created += stats.quizzes_created
-            total_stats.quizzes_completed += stats.quizzes_completed
-            total_stats.questions_answered += stats.questions_answered
-            total_stats.questions_asked += stats.questions_asked
-            total_stats.correct_answers += stats.correct_answers
-            total_stats.challenges_completed += stats.challenges_completed
-            total_stats.xp_gained += stats.xp_gained
-            if stats.streak_days > total_stats.streak_days:
-                total_stats.streak_days = stats.streak_days
-        return {
-            "total_study_time": total_stats.total_study_time,
-            "documents_read": total_stats.documents_read,
-            "repositories_created": total_stats.repositories_created,
-            "repositories_accessed": total_stats.repositories_accessed,
-            "documents_uploaded": total_stats.documents_uploaded,
-            "couses_created": total_stats.couses_created,
-            "messages_sent": total_stats.messages_sent,
-            "chat_created": total_stats.chat_created,
-            "quizzes_created": total_stats.quizzes_created,
-            "quizzes_completed": total_stats.quizzes_completed,
-            "questions_answered": total_stats.questions_answered,
-            "questions_asked": total_stats.questions_asked,
-            "correct_answers": total_stats.correct_answers,
-            "streak_days": total_stats.streak_days,
-            "challenges_completed": total_stats.challenges_completed,
-            "xp_gained": total_stats.xp_gained
-        }
+        totals = {name: sum(getattr(s, name) for s in self.study_stats) for name in COUNTER_FIELDS}
+        totals["streak_days"] = max(s.streak_days for s in self.study_stats)
+        return totals
